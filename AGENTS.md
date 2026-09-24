@@ -19,6 +19,14 @@ The optional `atproto-projection` profile runs `atproto-project -run`, an allowl
 
 ## Verification
 
+For isolated T3 development, use `bash scripts/dev-env.sh start` and the printed
+preview URL. `seed` creates synthetic demo data through normal signup/verification;
+`watch` restarts the backend on edits. `stop` retains the worktree's data.
+Use `bash scripts/dev-env.sh verify` to run the required verification and a
+separate disposable DB gate with pinned toolchains. Never substitute the dev
+database for the disposable test database. The standalone `compose.dev.yml`
+must not be merged with deployment Compose files or given production credentials.
+
 Run:
 
 ```bash

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "defaultThreadEnvMode": "worktree",
+  "scripts": [
+    { "name": "Setup Worktree", "command": "bash scripts/dev-env.sh setup", "runOnWorktreeCreate": true, "async": false },
+    { "name": "Start Dev", "command": "bash scripts/dev-env.sh start" },
+    { "name": "Watch Backend", "command": "bash scripts/dev-env.sh watch" },
+    { "name": "Preview URL", "command": "bash scripts/dev-env.sh url" },
+    { "name": "Seed Demo Data", "command": "bash scripts/dev-env.sh seed" },
+    { "name": "Test", "command": "bash scripts/dev-env.sh test" },
+    { "name": "Test Database", "command": "bash scripts/dev-env.sh test-db" },
+    { "name": "Verify", "command": "bash scripts/dev-env.sh verify" },
+    { "name": "Logs", "command": "bash scripts/dev-env.sh logs" },
+    { "name": "Stop Dev", "command": "bash scripts/dev-env.sh stop" }
+  ]
+}

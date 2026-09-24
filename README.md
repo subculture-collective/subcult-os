@@ -21,6 +21,52 @@ See the [Subcult.tv platform development handoff](docs/development/README.md), [
 
 ## Quick start
 
+### T3 worktree development
+
+Prerequisites: Docker with Compose 2.32 or newer, Mise, Bash, curl, and flock.
+The checked-in `t3.json` provides Setup Worktree, Start Dev, Watch Backend,
+Preview URL, Seed Demo Data, Test, Test Database, Verify, Logs, and Stop Dev actions.
+Import the actions from the project's **From t3.json** menu once per T3 environment.
+The imported Setup Worktree action runs for new worktrees and waits for dependencies
+before the agent starts. Start new worktrees from a branch containing these files;
+older branches need this change merged or cherry-picked first. Existing worktrees
+with these files can run the same commands manually:
+
+```bash
+bash scripts/dev-env.sh start
+bash scripts/dev-env.sh seed
+bash scripts/dev-env.sh watch
+```
+
+Start prints the actual loopback preview URL. The frontend reloads on edits;
+Watch Backend restarts the Go service on backend changes while that terminal
+remains open. Stop the watcher with Ctrl-C. Use `bash scripts/dev-env.sh stop`
+to stop only this worktree's containers, retaining its database and build caches.
+Start resumes it. Docker-assigned ports may change after a stop or recreation;
+use Preview URL again. These URLs are local to the machine running T3.
+
+Seed Demo Data creates `dev@example.test` with password `local-development-only`,
+a Development Collective workspace, and a draft Development Night event. It
+reads only that synthetic user's held verification mail and consumes the normal
+verification endpoint. Repeating it preserves the existing demo workspace/event.
+No external mail is sent.
+
+```bash
+bash scripts/dev-env.sh test      # backend, web, mobile, and QA helper tests
+bash scripts/dev-env.sh test-db   # separate disposable PostgreSQL database
+bash scripts/dev-env.sh verify    # make verify, followed by make test-db
+```
+
+The helpers pin Node 24.18.0, pnpm 10.33.0, and Go 1.26.6. Each worktree has
+its own Compose project, network, development database, and Go caches. Test DB
+containers use temporary storage and are removed after the run, including failed
+runs. `make verify` includes formatting and can update Go files. Local results
+do not replace hosted CI. The standalone `compose.dev.yml` does not load `.env`
+or inherit deployment credentials; live email, AT OAuth, and projection workers
+are disabled. Do not merge it with `docker-compose.yml`.
+
+### Existing build and deployment commands
+
 ```bash
 make verify
 ```

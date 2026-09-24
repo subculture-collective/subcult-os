@@ -1,0 +1,94 @@
+# Standalone development stack. Never merge with the deployment Compose file.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: disposable-dev-only
+      POSTGRES_DB: dev
+    volumes:
+      - dev-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U dev -d dev]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 512m
+
+  test-db:
+    image: postgres:17
+    profiles: [test]
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: disposable-test-only
+      POSTGRES_DB: test
+    ports:
+      - "127.0.0.1::5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U test -d test]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 512m
+
+  api:
+    image: golang:1.26.6
+    init: true
+    working_dir: /src/backend
+    command: [go, run, ./cmd/app]
+    environment:
+      APP_ENV: development
+      API_ADDR: :8080
+      DATABASE_URL: postgres://dev:disposable-dev-only@postgres:5432/dev?sslmode=disable
+      PUBLIC_WEB_URL: ${DEV_WEB_URL:-http://localhost:5173}
+      SESSION_SECRET: isolated-development-only
+      MAIL_DELIVERY_ENABLED: "false"
+      ATPROTO_OAUTH_ENABLED: "false"
+      AT_PROJECTION_ENABLED: "false"
+      GOMAXPROCS: "2"
+    volumes:
+      - ./backend:/src/backend:ro
+      - go-mod:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8080/api/health]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+    develop:
+      watch:
+        - action: restart
+          path: ./backend
+          ignore: ["**/*_test.go"]
+    cpus: 2
+    mem_limit: 2g
+
+  web:
+    image: node:24-bookworm-slim
+    init: true
+    user: "${DEV_UID:?}:${DEV_GID:?}"
+    working_dir: /src/web
+    command: [node, node_modules/vite/bin/vite.js, --host, 0.0.0.0, --port, "5173", --strictPort]
+    environment:
+      DEV_API_TARGET: http://api:8080
+    volumes:
+      - .:/src
+    ports:
+      - "127.0.0.1::5173"
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://localhost:5173').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    cpus: 2
+    mem_limit: 1g
+
+volumes:
+  dev-data:
+  go-mod:
+  go-build:
