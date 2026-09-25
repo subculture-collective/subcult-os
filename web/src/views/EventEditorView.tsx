@@ -2107,6 +2107,9 @@ export function EventEditorView({ eventId }: { eventId: string }) {
                               <a className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-zinc-100 transition hover:bg-white/10" href={`/workspace?workspaceId=${event.workspaceId}`}>
                                 Back to workspace archive
                               </a>
+                              <a className="rounded-2xl border border-violet-400/30 bg-violet-300 px-4 py-3 font-medium text-zinc-950 transition hover:bg-violet-200" href={`/events/${event.id}/public-archive`}>
+                                Manage future public archive
+                              </a>
                               {archive.seededEventId ? (
                                 <a className="rounded-2xl border border-violet-400/30 bg-violet-300 px-4 py-3 font-medium text-zinc-950 transition hover:bg-violet-200" href={`/events/${archive.seededEventId}?workspaceId=${event.workspaceId}`}>
                                   Open seeded draft

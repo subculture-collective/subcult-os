@@ -339,6 +339,18 @@ describe('App routes', () => {
     expect(rendered).toContain('Events start inside a workspace');
   });
 
+  it('renders the private future-public-archive route with approval controls', () => {
+    const rendered = renderAt('/events/event-1/public-archive');
+    expect(rendered).toContain('Approved for a future public archive');
+    expect(rendered).toContain('private owner ledger');
+    expect(rendered).toContain('Approve for future archive');
+    expect(rendered).toContain('Intended public use');
+    expect(rendered).toContain('Rights assertion');
+    expect(rendered).toContain('Back to event archive and editor');
+    expect(rendered).not.toContain('Private archive note');
+    expect(rendered).not.toContain('Settlement summary');
+  });
+
   it('renders the event editor pricing copy', () => {
     const rendered = renderWithState('/events/new?workspaceId=workspace-1', <EventEditorView eventId="new" />);
     expect(rendered).toContain('Pricing');

@@ -96,6 +96,10 @@
         "checkedInAt"
       ]
     },
+    "PublicArchiveItemDTO": {
+      "required": ["id", "eventId", "kind", "title", "attributionName", "intendedUse", "rightsAssertion", "evidenceReference", "status", "unavailableReason", "approvedAt", "createdAt"],
+      "forbidden": ["reportId", "settlementId", "ticket", "email", "amountCents", "currency", "participants", "staffingItems", "notes", "incident", "contact", "commitment"]
+    },
     "DoorTicketDTO": {
       "required": ["id", "code", "displayName", "admissionEligible", "status", "checkedInAt"],
       "forbidden": ["email", "amountCents", "currency", "paymentStatus", "eventId", "ticketUrl"]

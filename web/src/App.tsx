@@ -9,6 +9,7 @@ import { PublicEventView } from './views/PublicEventView';
 import { ParticipantPortalView } from './views/ParticipantPortalView';
 import { TicketView } from './views/TicketView';
 import { WorkspaceView } from './views/WorkspaceView';
+import { PublicArchiveItemsPanel } from './components/PublicArchiveItemsPanel';
 
 function getPathname() {
   if (typeof window === 'undefined') {
@@ -62,6 +63,7 @@ export default function App() {
   }
 
   if (pathname.startsWith('/events/')) {
+    if (pathname.endsWith('/public-archive')) return <PublicArchiveItemsPanel eventId={getSegment(pathname, 2)} />;
     return <EventEditorView eventId={getSegment(pathname, 2)} />;
   }
 
