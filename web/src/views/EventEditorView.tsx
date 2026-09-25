@@ -58,7 +58,7 @@ import {
 	loadEventEditorTemplates,
 	loadEventEditorWorkspace,
 } from '../modules/eventEditor/eventEditorLoaders';
-import { canDownloadSettlementExport, downloadSettlementExport } from '../modules/eventEditor/settlementExport';
+import { canDownloadSettlementExport, downloadSettlementExport, downloadSettlementReport } from '../modules/eventEditor/settlementExport';
 import type {
   CommitmentDTO,
   CurrentWorkspaceDTO,
@@ -1036,7 +1036,26 @@ export function EventEditorView({ eventId }: { eventId: string }) {
     try {
       await downloadSettlementExport(event.id);
     } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 403) { setSettlement(null); setSettlementAccessDenied(true); }
       setError(caught instanceof Error ? caught.message : 'Unable to download settlement CSV');
+    } finally {
+      setSettlementExporting(false);
+    }
+  }
+
+  async function handleSettlementReportExport(kind: 'markdown' | 'print') {
+    if (!event || !settlement || !canExportSettlement || settlementExporting) return;
+    setSettlementExporting(true);
+    setMessage(null);
+    setError(null);
+    try {
+      await downloadSettlementReport(event.id, kind);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 403) {
+        setSettlement(null);
+        setSettlementAccessDenied(true);
+      }
+      setError(caught instanceof Error ? caught.message : 'Unable to download settlement report');
     } finally {
       setSettlementExporting(false);
     }
@@ -1501,14 +1520,32 @@ export function EventEditorView({ eventId }: { eventId: string }) {
                   <p className="mt-2 text-sm text-zinc-400">Status: {settlementStatusLabel(settlementFinalized ? 'finalized' : 'open')}</p>
 
                   {canExportSettlement ? (
-                    <button
-                      className="mt-4 rounded-2xl border border-cyan-300/30 bg-cyan-300 px-4 py-3 font-medium text-zinc-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-cyan-300/60"
-                      type="button"
-                      onClick={handleSettlementExport}
-                      disabled={settlementExporting}
-                    >
-                      {settlementExporting ? 'Preparing CSV…' : 'Download settlement CSV'}
-                    </button>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <button
+                        className="rounded-2xl border border-cyan-300/30 bg-cyan-300 px-4 py-3 font-medium text-zinc-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-cyan-300/60"
+                        type="button"
+                        onClick={handleSettlementExport}
+                        disabled={settlementExporting}
+                      >
+                        {settlementExporting ? 'Preparing export…' : 'Download settlement CSV'}
+                      </button>
+                      <button
+                        className="rounded-2xl border border-cyan-300/30 px-4 py-3 disabled:opacity-60"
+                        type="button"
+                        disabled={settlementExporting}
+                        onClick={() => void handleSettlementReportExport('markdown')}
+                      >
+                        Download Markdown report
+                      </button>
+                      <button
+                        className="rounded-2xl border border-cyan-300/30 px-4 py-3 disabled:opacity-60"
+                        type="button"
+                        disabled={settlementExporting}
+                        onClick={() => void handleSettlementReportExport('print')}
+                      >
+                        Download printable HTML
+                      </button>
+                    </div>
                   ) : null}
 
                   {settlementFinalized ? (
