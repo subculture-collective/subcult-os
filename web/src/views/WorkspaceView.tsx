@@ -140,6 +140,7 @@ function buildOperatorGuidance(events: EventDTO[], workspaceId: string): Operato
       tone: 'amber',
       actions: [
         { label: 'Create event', href: `/events/new?workspaceId=${workspaceId}`, variant: 'primary' },
+        { label: 'Import occurrences', href: `/workspace/${workspaceId}/cultural-imports`, variant: 'ghost' },
         { label: 'Invite member', href: '#invite-member', variant: 'secondary' },
       ],
     };

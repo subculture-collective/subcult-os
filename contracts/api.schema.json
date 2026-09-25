@@ -7,6 +7,14 @@
     "SignupResultDTO": {
       "required": ["verificationRequired", "email"]
     },
+    "EventStaffingItemDTO": {
+      "required": ["id", "eventId", "title", "kind", "notes", "participantRequirements", "status", "createdAt", "updatedAt"],
+      "forbidden": ["ticket", "paymentStatus", "amountCents", "currency", "settlement", "contact"]
+    },
+    "ParticipantAssignmentDTO": {
+      "required": ["eventId", "eventTitle", "staffingItemId", "title", "kind", "status", "participantRequirements"],
+      "forbidden": ["notes", "assignedApplicationId", "applicantEmail", "message", "ticket", "paymentStatus", "amountCents", "currency", "settlement", "contact"]
+    },
     "WorkspaceSummaryDTO": {
       "required": ["id", "name", "role"]
     },
@@ -120,7 +128,7 @@
       ]
     },
     "PaidReservationDTO": {
-      "required": ["ticketId", "ticketCode", "ticketUrl", "checkoutSessionId", "checkoutUrl"]
+      "required": ["ticketId", "ticketCode", "ticketUrl", "checkoutSessionId", "checkoutUrl", "checkoutStatus"]
     },
     "PublicDiscoveryOccurrenceDTO": {
       "required": ["uri", "source", "name", "startsAt", "status", "projectionStatus", "handoff"],

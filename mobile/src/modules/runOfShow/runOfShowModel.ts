@@ -4,6 +4,7 @@ export type RunOfShowFormState = {
 	title: string;
 	kind: EventStaffingItemDTO['kind'];
 	notes: string;
+	participantRequirements: string;
 	startsAt: string;
 	endsAt: string;
 };
@@ -12,6 +13,7 @@ export type RunOfShowCreatePayload = {
 	title: string;
 	kind: EventStaffingItemDTO['kind'];
 	notes: string;
+	participantRequirements: string;
 	startsAt: string | null;
 	endsAt: string | null;
 };
@@ -19,6 +21,7 @@ export type RunOfShowCreatePayload = {
 export type RunOfShowUpdatePayload = {
 	title: string;
 	notes: string;
+	participantRequirements: string;
 	startsAt?: string | null;
 	clearStartsAt?: boolean;
 	endsAt?: string | null;
@@ -26,7 +29,7 @@ export type RunOfShowUpdatePayload = {
 };
 
 export function emptyRunOfShowForm(): RunOfShowFormState {
-	return { title: '', kind: 'task', notes: '', startsAt: '', endsAt: '' };
+	return { title: '', kind: 'task', notes: '', participantRequirements: '', startsAt: '', endsAt: '' };
 }
 
 export function parseOptionalDateTime(value: string): string | null | false {
@@ -124,13 +127,14 @@ export function staffingWindowLabel(item: EventStaffingItemDTO) {
 }
 
 export function buildCreateRunOfShowPayload(form: RunOfShowFormState, startsAt: string | null, endsAt: string | null): RunOfShowCreatePayload {
-	return { title: form.title.trim(), kind: form.kind, notes: form.notes.trim(), startsAt, endsAt };
+	return { title: form.title.trim(), kind: form.kind, notes: form.notes.trim(), participantRequirements: form.participantRequirements.trim(), startsAt, endsAt };
 }
 
-export function buildUpdateRunOfShowPayload(form: Pick<RunOfShowFormState, 'title' | 'notes'>, startsAt: string | null, endsAt: string | null): RunOfShowUpdatePayload {
+export function buildUpdateRunOfShowPayload(form: Pick<RunOfShowFormState, 'title' | 'notes' | 'participantRequirements'>, startsAt: string | null, endsAt: string | null): RunOfShowUpdatePayload {
 	return {
 		title: form.title.trim(),
 		notes: form.notes.trim(),
+		participantRequirements: form.participantRequirements.trim(),
 		...(startsAt ? { startsAt } : { clearStartsAt: true }),
 		...(endsAt ? { endsAt } : { clearEndsAt: true }),
 	};

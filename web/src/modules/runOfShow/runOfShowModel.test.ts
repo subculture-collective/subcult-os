@@ -21,6 +21,7 @@ function staffingItem(overrides: Partial<EventStaffingItemDTO>): EventStaffingIt
 		title: 'Task',
 		kind: 'task',
 		notes: '',
+		participantRequirements: '',
 		startsAt: null,
 		endsAt: null,
 		assignedPersonId: null,
@@ -78,8 +79,8 @@ describe('run of show helpers', () => {
 	it('builds payloads without imposing web time-range validation', () => {
 		expect(isRunOfShowTimeRangeValid('2026-06-18T10:00:00.000Z', '2026-06-18T11:00:00.000Z')).toBe(true);
 		expect(isRunOfShowTimeRangeValid('2026-06-18T11:00:00.000Z', '2026-06-18T10:00:00.000Z')).toBe(false);
-		expect(buildCreateRunOfShowPayload({ title: '  Call sheet ', kind: 'shift', notes: '  Bring radios ', startsAt: '', endsAt: '' }, null, null)).toEqual({ title: 'Call sheet', kind: 'shift', notes: 'Bring radios', startsAt: null, endsAt: null });
-		expect(buildCreateRunOfShowPayload({ title: ' Reverse ', kind: 'task', notes: '', startsAt: '', endsAt: '' }, '2026-06-18T11:00:00.000Z', '2026-06-18T10:00:00.000Z')).toEqual({ title: 'Reverse', kind: 'task', notes: '', startsAt: '2026-06-18T11:00:00.000Z', endsAt: '2026-06-18T10:00:00.000Z' });
-		expect(buildUpdateRunOfShowPayload({ title: '  Update ', notes: '  Keep ' }, '2026-06-18T10:00:00.000Z', null)).toEqual({ title: 'Update', notes: 'Keep', startsAt: '2026-06-18T10:00:00.000Z', clearEndsAt: true });
+		expect(buildCreateRunOfShowPayload({ title: '  Call sheet ', kind: 'shift', notes: '  Bring radios ', participantRequirements: '  Wear black ', startsAt: '', endsAt: '' }, null, null)).toEqual({ title: 'Call sheet', kind: 'shift', notes: 'Bring radios', participantRequirements: 'Wear black', startsAt: null, endsAt: null });
+		expect(buildCreateRunOfShowPayload({ title: ' Reverse ', kind: 'task', notes: '', participantRequirements: '', startsAt: '', endsAt: '' }, '2026-06-18T11:00:00.000Z', '2026-06-18T10:00:00.000Z')).toEqual({ title: 'Reverse', kind: 'task', notes: '', participantRequirements: '', startsAt: '2026-06-18T11:00:00.000Z', endsAt: '2026-06-18T10:00:00.000Z' });
+		expect(buildUpdateRunOfShowPayload({ title: '  Update ', notes: '  Keep ', participantRequirements: '  Bring ID ' }, '2026-06-18T10:00:00.000Z', null)).toEqual({ title: 'Update', notes: 'Keep', participantRequirements: 'Bring ID', startsAt: '2026-06-18T10:00:00.000Z', clearEndsAt: true });
 	});
 });

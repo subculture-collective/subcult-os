@@ -14,60 +14,64 @@ import (
 )
 
 type createEventStaffingRequest struct {
-	Title    string  `json:"title"`
-	Kind     string  `json:"kind"`
-	Notes    string  `json:"notes"`
-	StartsAt *string `json:"startsAt"`
-	EndsAt   *string `json:"endsAt"`
+	Title                   string  `json:"title"`
+	Kind                    string  `json:"kind"`
+	Notes                   string  `json:"notes"`
+	ParticipantRequirements string  `json:"participantRequirements"`
+	StartsAt                *string `json:"startsAt"`
+	EndsAt                  *string `json:"endsAt"`
 }
 
 type updateEventStaffingRequest struct {
-	Title                 *string `json:"title"`
-	Notes                 *string `json:"notes"`
-	StartsAt              *string `json:"startsAt"`
-	ClearStartsAt         bool    `json:"clearStartsAt"`
-	EndsAt                *string `json:"endsAt"`
-	ClearEndsAt           bool    `json:"clearEndsAt"`
-	AssignedPersonID      *string `json:"assignedPersonId"`
-	AssignedApplicationID *string `json:"assignedApplicationId"`
-	ClearAssignee         bool    `json:"clearAssignee"`
-	Status                *string `json:"status"`
+	Title                   *string `json:"title"`
+	Notes                   *string `json:"notes"`
+	ParticipantRequirements *string `json:"participantRequirements"`
+	StartsAt                *string `json:"startsAt"`
+	ClearStartsAt           bool    `json:"clearStartsAt"`
+	EndsAt                  *string `json:"endsAt"`
+	ClearEndsAt             bool    `json:"clearEndsAt"`
+	AssignedPersonID        *string `json:"assignedPersonId"`
+	AssignedApplicationID   *string `json:"assignedApplicationId"`
+	ClearAssignee           bool    `json:"clearAssignee"`
+	Status                  *string `json:"status"`
 }
 
 type eventStaffingItemDTO struct {
-	ID                    string  `json:"id"`
-	EventID               string  `json:"eventId"`
-	Title                 string  `json:"title"`
-	Kind                  string  `json:"kind"`
-	Notes                 string  `json:"notes"`
-	StartsAt              *string `json:"startsAt,omitempty"`
-	EndsAt                *string `json:"endsAt,omitempty"`
-	AssignedPersonID      *string `json:"assignedPersonId,omitempty"`
-	AssignedApplicationID *string `json:"assignedApplicationId,omitempty"`
-	AssigneeName          *string `json:"assigneeName,omitempty"`
-	Status                string  `json:"status"`
-	CreatedAt             string  `json:"createdAt"`
-	UpdatedAt             string  `json:"updatedAt"`
-	CompletedAt           *string `json:"completedAt,omitempty"`
-	CompletedByPersonID   *string `json:"completedByPersonId,omitempty"`
+	ID                      string  `json:"id"`
+	EventID                 string  `json:"eventId"`
+	Title                   string  `json:"title"`
+	Kind                    string  `json:"kind"`
+	Notes                   string  `json:"notes"`
+	ParticipantRequirements string  `json:"participantRequirements"`
+	StartsAt                *string `json:"startsAt,omitempty"`
+	EndsAt                  *string `json:"endsAt,omitempty"`
+	AssignedPersonID        *string `json:"assignedPersonId,omitempty"`
+	AssignedApplicationID   *string `json:"assignedApplicationId,omitempty"`
+	AssigneeName            *string `json:"assigneeName,omitempty"`
+	Status                  string  `json:"status"`
+	CreatedAt               string  `json:"createdAt"`
+	UpdatedAt               string  `json:"updatedAt"`
+	CompletedAt             *string `json:"completedAt,omitempty"`
+	CompletedByPersonID     *string `json:"completedByPersonId,omitempty"`
 }
 
 type eventStaffingItemRow struct {
-	ID                    string
-	EventID               string
-	Title                 string
-	Kind                  string
-	Notes                 string
-	StartsAt              sql.NullTime
-	EndsAt                sql.NullTime
-	AssignedPersonID      sql.NullString
-	AssignedApplicationID sql.NullString
-	AssigneeName          sql.NullString
-	Status                string
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	CompletedAt           sql.NullTime
-	CompletedByPersonID   sql.NullString
+	ID                      string
+	EventID                 string
+	Title                   string
+	Kind                    string
+	Notes                   string
+	ParticipantRequirements string
+	StartsAt                sql.NullTime
+	EndsAt                  sql.NullTime
+	AssignedPersonID        sql.NullString
+	AssignedApplicationID   sql.NullString
+	AssigneeName            sql.NullString
+	Status                  string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	CompletedAt             sql.NullTime
+	CompletedByPersonID     sql.NullString
 }
 
 type staffingRowQuerier interface {
@@ -94,7 +98,7 @@ func (a *App) handleListEventStaffing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := a.db.Query(r.Context(), `
-		select esi.id, esi.event_id, esi.title, esi.kind, esi.notes, esi.starts_at, esi.ends_at,
+		select esi.id, esi.event_id, esi.title, esi.kind, esi.notes, esi.participant_requirements, esi.starts_at, esi.ends_at,
 		       esi.assigned_person_id, esi.assigned_application_id,
 		       coalesce(nullif(trim(p.display_name), ''), p.email, era.applicant_name) as assignee_name,
 		       esi.status, esi.created_at, esi.updated_at, esi.completed_at, esi.completed_by_person_id
@@ -119,7 +123,7 @@ func (a *App) handleListEventStaffing(w http.ResponseWriter, r *http.Request) {
 	items := make([]eventStaffingItemDTO, 0)
 	for rows.Next() {
 		var row eventStaffingItemRow
-		if err := rows.Scan(&row.ID, &row.EventID, &row.Title, &row.Kind, &row.Notes, &row.StartsAt, &row.EndsAt, &row.AssignedPersonID, &row.AssignedApplicationID, &row.AssigneeName, &row.Status, &row.CreatedAt, &row.UpdatedAt, &row.CompletedAt, &row.CompletedByPersonID); err != nil {
+		if err := rows.Scan(&row.ID, &row.EventID, &row.Title, &row.Kind, &row.Notes, &row.ParticipantRequirements, &row.StartsAt, &row.EndsAt, &row.AssignedPersonID, &row.AssignedApplicationID, &row.AssigneeName, &row.Status, &row.CreatedAt, &row.UpdatedAt, &row.CompletedAt, &row.CompletedByPersonID); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not load staffing")
 			return
 		}
@@ -189,6 +193,7 @@ func (a *App) handleCreateEventStaffing(w http.ResponseWriter, r *http.Request) 
 	title := strings.TrimSpace(req.Title)
 	kind := strings.ToLower(strings.TrimSpace(req.Kind))
 	notes := strings.TrimSpace(req.Notes)
+	participantRequirements := strings.TrimSpace(req.ParticipantRequirements)
 	if title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
@@ -201,6 +206,10 @@ func (a *App) handleCreateEventStaffing(w http.ResponseWriter, r *http.Request) 
 	}
 	if utf8.RuneCountInString(notes) > 2000 {
 		writeError(w, http.StatusBadRequest, "notes must be 2000 characters or fewer")
+		return
+	}
+	if utf8.RuneCountInString(participantRequirements) > 2000 {
+		writeError(w, http.StatusBadRequest, "participantRequirements must be 2000 characters or fewer")
 		return
 	}
 	startsAt, err := parseOptionalRFC3339Time(req.StartsAt)
@@ -230,15 +239,15 @@ func (a *App) handleCreateEventStaffing(w http.ResponseWriter, r *http.Request) 
 	var row eventStaffingItemRow
 	if err := tx.QueryRow(r.Context(), `
 		insert into event_staffing_items (
-			event_id, title, kind, notes, starts_at, ends_at, status, created_by_person_id
+			event_id, title, kind, notes, participant_requirements, starts_at, ends_at, status, created_by_person_id
 		)
-		values ($1, $2, $3, $4, $5, $6, 'open', $7)
-		returning id, event_id, title, kind, notes, starts_at, ends_at,
+		values ($1, $2, $3, $4, $5, $6, $7, 'open', $8)
+		returning id, event_id, title, kind, notes, participant_requirements, starts_at, ends_at,
 		          assigned_person_id, assigned_application_id,
 		          null as assignee_name,
 		          status, created_at, updated_at, completed_at, completed_by_person_id
-	`, lockedEventID, title, kind, notes, startsAtArg, endsAtArg, actorID).Scan(
-		&row.ID, &row.EventID, &row.Title, &row.Kind, &row.Notes, &row.StartsAt, &row.EndsAt,
+	`, lockedEventID, title, kind, notes, participantRequirements, startsAtArg, endsAtArg, actorID).Scan(
+		&row.ID, &row.EventID, &row.Title, &row.Kind, &row.Notes, &row.ParticipantRequirements, &row.StartsAt, &row.EndsAt,
 		&row.AssignedPersonID, &row.AssignedApplicationID, &row.AssigneeName, &row.Status, &row.CreatedAt, &row.UpdatedAt, &row.CompletedAt, &row.CompletedByPersonID,
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create staffing item")
@@ -313,6 +322,15 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		requestedNotes = &notes
+	}
+	var requestedParticipantRequirements *string
+	if req.ParticipantRequirements != nil {
+		requirements := strings.TrimSpace(*req.ParticipantRequirements)
+		if utf8.RuneCountInString(requirements) > 2000 {
+			writeError(w, http.StatusBadRequest, "participantRequirements must be 2000 characters or fewer")
+			return
+		}
+		requestedParticipantRequirements = &requirements
 	}
 	startsAt, err := parseOptionalRFC3339Time(req.StartsAt)
 	if err != nil {
@@ -413,6 +431,10 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 	}
 	if requestedNotes != nil && *requestedNotes != current.Notes {
 		newRow.Notes = *requestedNotes
+		changed = true
+	}
+	if requestedParticipantRequirements != nil && *requestedParticipantRequirements != current.ParticipantRequirements {
+		newRow.ParticipantRequirements = *requestedParticipantRequirements
 		changed = true
 	}
 	if req.ClearStartsAt {
@@ -557,17 +579,18 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 		update event_staffing_items
 		set title = $3,
 		    notes = $4,
-		    starts_at = $5,
-		    ends_at = $6,
-		    assigned_person_id = $7,
-		    assigned_application_id = $8,
-		    status = $9,
-		    completed_at = $10,
-		    completed_by_person_id = $11,
+		    participant_requirements = $5,
+		    starts_at = $6,
+		    ends_at = $7,
+		    assigned_person_id = $8,
+		    assigned_application_id = $9,
+		    status = $10,
+		    completed_at = $11,
+		    completed_by_person_id = $12,
 		    updated_at = now()
 		where event_id = $1
 		  and id = $2
-	`, lockedEventID, current.ID, newRow.Title, newRow.Notes, startsAtArg, endsAtArg, assignedPersonArg, assignedApplicationArg, newRow.Status, completedAtArg, completedByArg); err != nil {
+	`, lockedEventID, current.ID, newRow.Title, newRow.Notes, newRow.ParticipantRequirements, startsAtArg, endsAtArg, assignedPersonArg, assignedApplicationArg, newRow.Status, completedAtArg, completedByArg); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not update staffing item")
 		return
 	}
@@ -622,14 +645,15 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 
 func eventStaffingItemDTOFromRow(row eventStaffingItemRow) eventStaffingItemDTO {
 	dto := eventStaffingItemDTO{
-		ID:        row.ID,
-		EventID:   row.EventID,
-		Title:     row.Title,
-		Kind:      row.Kind,
-		Notes:     row.Notes,
-		Status:    row.Status,
-		CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339Nano),
-		UpdatedAt: row.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		ID:                      row.ID,
+		EventID:                 row.EventID,
+		Title:                   row.Title,
+		Kind:                    row.Kind,
+		Notes:                   row.Notes,
+		ParticipantRequirements: row.ParticipantRequirements,
+		Status:                  row.Status,
+		CreatedAt:               row.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:               row.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	dto.StartsAt = nullableTimeString(row.StartsAt)
 	dto.EndsAt = nullableTimeString(row.EndsAt)
@@ -655,7 +679,7 @@ func parseOptionalRFC3339Time(value *string) (*time.Time, error) {
 func loadEventStaffingItemRow(ctx context.Context, q staffingRowQuerier, eventID, staffingID string) (eventStaffingItemRow, error) {
 	var row eventStaffingItemRow
 	if err := q.QueryRow(ctx, `
-		select esi.id, esi.event_id, esi.title, esi.kind, esi.notes, esi.starts_at, esi.ends_at,
+		select esi.id, esi.event_id, esi.title, esi.kind, esi.notes, esi.participant_requirements, esi.starts_at, esi.ends_at,
 		       esi.assigned_person_id, esi.assigned_application_id,
 		       coalesce(nullif(trim(p.display_name), ''), p.email, era.applicant_name) as assignee_name,
 		       esi.status, esi.created_at, esi.updated_at, esi.completed_at, esi.completed_by_person_id
@@ -665,7 +689,7 @@ func loadEventStaffingItemRow(ctx context.Context, q staffingRowQuerier, eventID
 		where esi.event_id = $1
 		  and esi.id = $2
 		for update of esi
-	`, eventID, staffingID).Scan(&row.ID, &row.EventID, &row.Title, &row.Kind, &row.Notes, &row.StartsAt, &row.EndsAt, &row.AssignedPersonID, &row.AssignedApplicationID, &row.AssigneeName, &row.Status, &row.CreatedAt, &row.UpdatedAt, &row.CompletedAt, &row.CompletedByPersonID); err != nil {
+	`, eventID, staffingID).Scan(&row.ID, &row.EventID, &row.Title, &row.Kind, &row.Notes, &row.ParticipantRequirements, &row.StartsAt, &row.EndsAt, &row.AssignedPersonID, &row.AssignedApplicationID, &row.AssigneeName, &row.Status, &row.CreatedAt, &row.UpdatedAt, &row.CompletedAt, &row.CompletedByPersonID); err != nil {
 		return eventStaffingItemRow{}, err
 	}
 	return row, nil

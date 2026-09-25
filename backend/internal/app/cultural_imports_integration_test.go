@@ -1,6 +1,7 @@
 package app
 
 import (
+	"database/sql"
 	"net/http"
 	"strings"
 	"testing"
@@ -292,6 +293,237 @@ func TestCulturalImportPreviewMigrationUpgradesVersionSixteenFixture(t *testing.
 		if !exists {
 			t.Fatalf("upgraded fixture missing %s", table)
 		}
+	}
+}
+
+func TestCulturalImportApplyRequiresExplicitChoiceAndCanRollbackCleanCreate(t *testing.T) {
+	fx := newLifecycleFixture(t)
+	event := createEvent(t, fx, "Import target", 1)
+	eventID := mustString(t, event, "id")
+	preview := postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/preview", map[string]any{
+		"sourceId": "catalog", "sourceName": "Catalog", "sourceAssertion": "reviewed",
+		"csv": culturalImportCSV("source-1,Imported show,description,2026-11-01T06:30:00Z,,America/Chicago,scheduled,,,,US"),
+	}, http.StatusCreated)
+	candidate := mustObject(t, mustObject(t, preview.JSON)["candidates"].([]any)[0])
+	applyPath := "/api/workspaces/" + fx.workspaceID + "/cultural-imports/apply"
+	postJSON(t, fx.app, fx.ownerCookie, applyPath, map[string]any{"candidateId": candidate["id"], "mode": "create", "eventId": eventID}, http.StatusBadRequest)
+	action := postJSON(t, fx.app, fx.ownerCookie, applyPath, map[string]any{"candidateId": candidate["id"], "mode": "create", "eventId": eventID, "selectedFields": []string{"name", "description", "startsAt", "endsAt", "timezone", "status"}}, http.StatusCreated)
+	createdID := mustString(t, action.JSON, "createdOccurrenceId")
+	var placeID sql.NullString
+	if err := fx.app.db.QueryRow(t.Context(), `select place_id from event_occurrences where id=$1`, createdID).Scan(&placeID); err != nil {
+		t.Fatal(err)
+	}
+	if placeID.Valid {
+		t.Fatal("import inferred a place")
+	}
+	postJSON(t, fx.app, fx.ownerCookie, applyPath, map[string]any{"candidateId": candidate["id"], "mode": "create", "eventId": eventID, "selectedFields": []string{"name", "startsAt"}}, http.StatusConflict)
+	reloaded := getJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/"+mustString(t, preview.JSON, "id"), http.StatusOK)
+	actions, ok := mustObject(t, reloaded.JSON)["actions"].([]any)
+	if !ok || len(actions) != 1 || mustObject(t, actions[0])["id"] != action.JSON.(map[string]any)["id"] {
+		t.Fatalf("reloaded action = %#v", reloaded.JSON)
+	}
+	postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-import-actions/"+mustString(t, action.JSON, "id")+"/rollback", map[string]any{}, http.StatusOK)
+	reloaded = getJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/"+mustString(t, preview.JSON, "id"), http.StatusOK)
+	actions, ok = mustObject(t, reloaded.JSON)["actions"].([]any)
+	if !ok || len(actions) != 1 || mustObject(t, actions[0])["rolledBackAt"] == nil {
+		t.Fatalf("reloaded rolled-back action = %#v", reloaded.JSON)
+	}
+	var count int
+	if err := fx.app.db.QueryRow(t.Context(), `select count(*) from event_occurrences where id=$1`, createdID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("rollback left created occurrence count=%d", count)
+	}
+}
+
+func TestCulturalImportCorrectionChecksRevisionAndNeverRollsBackCanonicalTarget(t *testing.T) {
+	fx := newLifecycleFixture(t)
+	event := createEvent(t, fx, "Correction target", 1)
+	eventID := mustString(t, event, "id")
+	occurrence := postJSON(t, fx.app, fx.ownerCookie, "/api/events/"+eventID+"/occurrences", map[string]any{"name": "Original", "startsAt": "2026-11-01T06:30:00Z", "timezone": "America/Chicago", "status": "scheduled"}, http.StatusOK)
+	preview := postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/preview", map[string]any{"sourceId": "catalog", "sourceName": "Catalog", "sourceAssertion": "reviewed", "csv": culturalImportCSV("source-1,Changed,changed description,2026-11-01T06:30:00Z,,America/Chicago,cancelled,,,,US")}, http.StatusCreated)
+	candidate := mustObject(t, mustObject(t, preview.JSON)["candidates"].([]any)[0])
+	path := "/api/workspaces/" + fx.workspaceID + "/cultural-imports/apply"
+	postJSON(t, fx.app, fx.ownerCookie, path, map[string]any{"candidateId": candidate["id"], "mode": "correction", "eventId": eventID, "occurrenceId": mustString(t, occurrence.JSON, "id"), "selectedFields": []string{"name"}, "expectedUpdatedAt": "2020-01-01T00:00:00Z"}, http.StatusConflict)
+	action := postJSON(t, fx.app, fx.ownerCookie, path, map[string]any{"candidateId": candidate["id"], "mode": "correction", "eventId": eventID, "occurrenceId": mustString(t, occurrence.JSON, "id"), "selectedFields": []string{"name", "status"}, "expectedUpdatedAt": mustString(t, occurrence.JSON, "updatedAt")}, http.StatusCreated)
+	reloaded := getJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/"+mustString(t, preview.JSON, "id"), http.StatusOK)
+	actions, ok := mustObject(t, reloaded.JSON)["actions"].([]any)
+	if !ok || len(actions) != 1 || mustObject(t, actions[0])["id"] != action.JSON.(map[string]any)["id"] || mustObject(t, actions[0])["mode"] != "correction" {
+		t.Fatalf("reloaded correction action = %#v", reloaded.JSON)
+	}
+	postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-import-actions/"+mustString(t, action.JSON, "id")+"/rollback", map[string]any{}, http.StatusConflict)
+	var name string
+	if err := fx.app.db.QueryRow(t.Context(), `select name from event_occurrences where id=$1`, mustString(t, occurrence.JSON, "id")).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	if name != "Changed" {
+		t.Fatalf("correction was not retained: %q", name)
+	}
+}
+
+func TestCulturalImportActionsMigrationUpgradesVersionEighteenFixture(t *testing.T) {
+	ctx := t.Context()
+	db := newMigrationTestPool(t)
+	migrations, err := loadMigrations(migrationFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(migrations) < 19 {
+		t.Fatalf("migrations = %d, want at least 19", len(migrations))
+	}
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock($1)`, migrationLockID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `create table schema_migrations(version integer primary key,name text not null,checksum char(64) not null,applied_at timestamptz not null default now())`); err != nil {
+		t.Fatal(err)
+	}
+	for _, migration := range migrations[:18] {
+		if _, err := tx.Exec(ctx, migration.SQL); err != nil {
+			t.Fatalf("apply historical migration %d: %v", migration.Version, err)
+		}
+		if _, err := tx.Exec(ctx, `insert into schema_migrations(version,name,checksum) values($1,$2,$3)`, migration.Version, migration.Name, migration.Checksum); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, db); err != nil {
+		t.Fatalf("upgrade version-18 fixture: %v", err)
+	}
+	for _, table := range []string{"cultural_import_actions"} {
+		var exists bool
+		if err := db.QueryRow(ctx, `select exists(select 1 from information_schema.tables where table_schema=current_schema() and table_name=$1)`, table).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if !exists {
+			t.Fatalf("missing upgraded table %s", table)
+		}
+	}
+}
+
+func TestCulturalImportApplyAcknowledgementRolesBoundariesAndNoSideEffects(t *testing.T) {
+	fx := newLifecycleFixture(t)
+	event := createEvent(t, fx, "Action target", 1)
+	path := "/api/workspaces/" + fx.workspaceID + "/cultural-imports/apply"
+	preview := postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/preview", map[string]any{
+		"sourceId": "catalog", "sourceName": "Catalog", "sourceAssertion": "reviewed",
+		"csv": culturalImportCSV("bad,Bad,,not-a-date,,UTC,scheduled,,,,US", "good,Good,,2026-11-01T06:30:00Z,,UTC,scheduled,,,,US"),
+	}, http.StatusCreated)
+	candidate := mustObject(t, mustObject(t, preview.JSON)["candidates"].([]any)[0])
+	payload := map[string]any{"candidateId": candidate["id"], "mode": "create", "eventId": mustString(t, event, "id"), "selectedFields": []string{"name", "startsAt"}}
+	var occurrencesBefore, consentBefore, announcementsBefore, paymentsBefore int
+	if err := fx.app.db.QueryRow(t.Context(), `select (select count(*) from event_occurrences),(select count(*) from consent_grants),(select count(*) from announcements),(select count(*) from payment_checkout_attempts)`).Scan(&occurrencesBefore, &consentBefore, &announcementsBefore, &paymentsBefore); err != nil {
+		t.Fatal(err)
+	}
+	postJSON(t, fx.app, fx.ownerCookie, path, payload, http.StatusConflict)
+	payload["acknowledgeErrors"] = true
+	postJSON(t, fx.app, fx.memberCookie, path, payload, http.StatusForbidden)
+	other := newLifecycleFixture(t, fx.app)
+	otherEvent := createEvent(t, other, "Other target", 1)
+	payload["eventId"] = mustString(t, otherEvent, "id")
+	postJSON(t, fx.app, fx.ownerCookie, path, payload, http.StatusBadRequest)
+	payload["eventId"] = mustString(t, event, "id")
+	postJSON(t, fx.app, fx.ownerCookie, path, payload, http.StatusCreated)
+	var occurrencesAfter, consentAfter, announcementsAfter, paymentsAfter int
+	if err := fx.app.db.QueryRow(t.Context(), `select (select count(*) from event_occurrences),(select count(*) from consent_grants),(select count(*) from announcements),(select count(*) from payment_checkout_attempts)`).Scan(&occurrencesAfter, &consentAfter, &announcementsAfter, &paymentsAfter); err != nil {
+		t.Fatal(err)
+	}
+	if occurrencesAfter != occurrencesBefore+1 || consentAfter != consentBefore || announcementsAfter != announcementsBefore || paymentsAfter != paymentsBefore {
+		t.Fatalf("unexpected side effects occurrences %d→%d consent %d→%d announcements %d→%d payments %d→%d", occurrencesBefore, occurrencesAfter, consentBefore, consentAfter, announcementsBefore, announcementsAfter, paymentsBefore, paymentsAfter)
+	}
+}
+
+func TestCulturalImportApplyRechecksAuthorityAfterEventLock(t *testing.T) {
+	fx := newLifecycleFixture(t)
+	eventID := mustString(t, createEvent(t, fx, "Import revoke race", 1), "id")
+	preview := postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/preview", map[string]any{
+		"sourceId": "catalog", "sourceName": "Catalog", "sourceAssertion": "reviewed",
+		"csv": culturalImportCSV("race,Imported,,2026-12-01T06:30:00Z,,UTC,scheduled,,,,US"),
+	}, http.StatusCreated)
+	candidate := mustObject(t, mustObject(t, preview.JSON)["candidates"].([]any)[0])
+	blocker, err := fx.app.db.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(t.Context()) }()
+	if _, err := blocker.Exec(t.Context(), `select id from events where id=$1 for update`, eventID); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan int, 1)
+	go func() {
+		result <- requestTicketCapacityReservation(fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/apply", map[string]any{
+			"candidateId": candidate["id"], "mode": "create", "eventId": eventID, "selectedFields": []string{"name", "startsAt"},
+		}).status
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if _, err := fx.app.db.Exec(t.Context(), `update workspace_members set revoked_at=clock_timestamp() where workspace_id=$1 and person_id=(select person_id from workspace_members where workspace_id=$1 and role='owner' limit 1)`, fx.workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := blocker.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if status := <-result; status != http.StatusForbidden {
+		t.Fatalf("revoked owner import apply status=%d", status)
+	}
+	var actions, occurrences int
+	if err := fx.app.db.QueryRow(t.Context(), `select (select count(*) from cultural_import_actions), (select count(*) from event_occurrences where event_id=$1)`, eventID).Scan(&actions, &occurrences); err != nil {
+		t.Fatal(err)
+	}
+	if actions != 0 || occurrences != 0 {
+		t.Fatalf("revoked import apply changed state: actions=%d occurrences=%d", actions, occurrences)
+	}
+}
+
+func TestCulturalImportCorrectionRejectsStaleCIDAndRollbackBlockers(t *testing.T) {
+	fx := newLifecycleFixture(t)
+	event := createEvent(t, fx, "Target", 1)
+	eventID := mustString(t, event, "id")
+	occurrence := postJSON(t, fx.app, fx.ownerCookie, "/api/events/"+eventID+"/occurrences", map[string]any{"name": "Target", "startsAt": "2026-11-01T06:30:00Z", "timezone": "UTC", "status": "scheduled"}, http.StatusOK)
+	occurrenceID := mustString(t, occurrence.JSON, "id")
+	preview := postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/preview", map[string]any{"sourceId": "catalog", "sourceName": "Catalog", "sourceAssertion": "reviewed", "csv": culturalImportCSV("one,Changed,,2026-11-01T06:30:00Z,,UTC,cancelled,,,,US")}, http.StatusCreated)
+	candidate := mustObject(t, mustObject(t, preview.JSON)["candidates"].([]any)[0])
+	match := mustObject(t, occurrence.JSON)
+	if _, err := fx.app.db.Exec(t.Context(), `update event_occurrences set public_cid='current' where id=$1`, occurrenceID); err != nil {
+		t.Fatal(err)
+	}
+	postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/apply", map[string]any{"candidateId": candidate["id"], "mode": "correction", "eventId": eventID, "occurrenceId": occurrenceID, "selectedFields": []string{"name"}, "expectedUpdatedAt": match["updatedAt"], "expectedPublicCid": "stale"}, http.StatusConflict)
+	// Each create action below is deliberately made distinct so rollback guards
+	// are tested independently instead of being masked by candidate idempotency.
+	for _, kind := range []string{"changed", "published", "credited", "later"} {
+		p := postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/preview", map[string]any{"sourceId": "catalog-" + kind, "sourceName": "Catalog", "sourceAssertion": "reviewed", "csv": culturalImportCSV(kind+",Created,,2026-12-01T06:30:00Z,,UTC,scheduled,,,,US", kind+"-later,Reference,,2026-12-02T06:30:00Z,,UTC,scheduled,,,,US")}, http.StatusCreated)
+		candidates := mustObject(t, p.JSON)["candidates"].([]any)
+		if len(candidates) != 2 {
+			t.Fatalf("%s candidates = %#v", kind, candidates)
+		}
+		c := mustObject(t, candidates[0])
+		action := postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-imports/apply", map[string]any{"candidateId": c["id"], "mode": "create", "eventId": eventID, "selectedFields": []string{"name", "startsAt"}}, http.StatusCreated)
+		created := mustString(t, action.JSON, "createdOccurrenceId")
+		switch kind {
+		case "changed":
+			if _, err := fx.app.db.Exec(t.Context(), `update event_occurrences set name='edited',updated_at=clock_timestamp() where id=$1`, created); err != nil {
+				t.Fatal(err)
+			}
+		case "published":
+			if _, err := fx.app.db.Exec(t.Context(), `update event_occurrences set public_cid='published' where id=$1`, created); err != nil {
+				t.Fatal(err)
+			}
+		case "credited":
+			profile := postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/profiles", map[string]any{"kind": "collective", "displayName": "Credit " + kind}, http.StatusOK)
+			postJSON(t, fx.app, fx.ownerCookie, "/api/events/"+eventID+"/occurrences/"+created+"/credits", map[string]any{"profileId": mustString(t, profile.JSON, "id")}, http.StatusOK)
+		case "later":
+			laterCandidate := mustObject(t, candidates[1])
+			if _, err := fx.app.db.Exec(t.Context(), `insert into cultural_import_actions(workspace_id,import_id,candidate_id,mode,target_event_id,target_occurrence_id,source_id_snapshot,content_sha256_snapshot,candidate_row_snapshot,field_diff,before_snapshot,after_snapshot,applied_by_person_id) select workspace_id,import_id,$3,'correction',target_event_id,$2,source_id_snapshot,content_sha256_snapshot,(select row_number from cultural_import_candidates where id=$3),'{}','{}','{}',applied_by_person_id from cultural_import_actions where id=$1`, mustString(t, action.JSON, "id"), created, laterCandidate["id"]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+fx.workspaceID+"/cultural-import-actions/"+mustString(t, action.JSON, "id")+"/rollback", map[string]any{}, http.StatusConflict)
 	}
 }
 

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { api, postJSON } from '../api';
+import { ApiError, api, postJSON } from '../api';
 import type { EventRoleApplicationDTO, EventRoleDTO, PaidReservationDTO, PublicEventDTO, TicketReservationDTO } from '../domain';
 import { reserveFreeTicket } from '../modules/publicEvent/reservation';
+import { checkoutDestination, checkoutTerminalState, nextPurchaseIntent } from '../modules/publicEvent/purchaseIntent';
 import {
   publicEventConversionSummary,
   publicEventPrimaryCtaLabel,
@@ -80,6 +81,10 @@ export function PublicEventView({ slug }: { slug: string }) {
   const [roles, setRoles] = useState<EventRoleDTO[] | null>(null);
   const [applicationDrafts, setApplicationDrafts] = useState<Record<string, RoleApplicationDraft>>({});
   const [availabilityKnown, setAvailabilityKnown] = useState(true);
+  const [pendingTicketURL, setPendingTicketURL] = useState<string | null>(null);
+  const paidIntent = useRef<{ email: string; displayName: string; key: string } | null>(null);
+  const latestSlug = useRef(slug);
+  latestSlug.current = slug;
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +99,8 @@ export function PublicEventView({ slug }: { slug: string }) {
       setRoles(null);
       setApplicationDrafts({});
       setAvailabilityKnown(true);
+	  setPendingTicketURL(null);
+      paidIntent.current = null;
 
       try {
         const loaded = await api<PublicEventDTO>(`/api/public/events/${slug}`);
@@ -209,6 +216,8 @@ export function PublicEventView({ slug }: { slug: string }) {
   async function handleSubmit(formEvent: FormEvent<HTMLFormElement>) {
     formEvent.preventDefault();
 
+    if (event?.pricingMode === 'fixed' && pendingTicketURL) return;
+
     const trimmedEmail = email.trim();
     const trimmedDisplayName = displayName.trim();
 
@@ -217,17 +226,28 @@ export function PublicEventView({ slug }: { slug: string }) {
       return;
     }
 
+    const requestSlug = slug;
     setReserving(true);
     setError(null);
+	setPendingTicketURL(null);
 
     try {
       if (event?.pricingMode === 'fixed') {
+        paidIntent.current = nextPurchaseIntent(paidIntent.current, trimmedEmail, trimmedDisplayName, () => crypto.randomUUID());
         const checkout = await postJSON<PaidReservationDTO>(`/api/public/events/${slug}/paid-reservations`, {
           email: trimmedEmail,
           displayName: trimmedDisplayName || undefined,
+          purchaseIntentKey: paidIntent.current.key,
         });
 
-        window.location.href = checkout.checkoutUrl;
+        const destination = checkoutDestination(checkout);
+        if (latestSlug.current !== requestSlug) return;
+        if (destination) {
+          window.location.href = destination;
+          return;
+        }
+        setPendingTicketURL(checkout.ticketUrl);
+        setError('Your checkout is awaiting confirmation. Do not submit another purchase; use your ticket link after the provider confirms it.');
         return;
       }
 
@@ -236,13 +256,25 @@ export function PublicEventView({ slug }: { slug: string }) {
         displayName: trimmedDisplayName || undefined,
       });
 
+      if (latestSlug.current !== requestSlug) return;
       setReservation(result.ticket);
       setAvailabilityKnown(result.event !== null);
       if (result.event) setEvent(result.event);
     } catch (caught) {
+      if (latestSlug.current !== requestSlug) return;
+      if (caught instanceof ApiError && caught.status === 409) {
+        const terminal = checkoutTerminalState(caught.data);
+        if (terminal) {
+          setPendingTicketURL(terminal.ticketUrl);
+          setError(terminal.status === 'expired'
+            ? 'This checkout expired before payment completed. Review your ticket status before starting another purchase.'
+            : 'This checkout needs reconciliation. Review your ticket status before starting another purchase.');
+          return;
+        }
+      }
       setError(caught instanceof Error ? caught.message : 'Unable to reserve ticket');
     } finally {
-      setReserving(false);
+      if (latestSlug.current === requestSlug) setReserving(false);
     }
   }
 
@@ -296,6 +328,7 @@ export function PublicEventView({ slug }: { slug: string }) {
         {error ? (
           <p aria-live="polite" className="rounded-3xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
             {error}
+			{pendingTicketURL ? <> <a className="underline" href={pendingTicketURL}>Open ticket status</a>.</> : null}
           </p>
         ) : null}
 
@@ -352,17 +385,17 @@ export function PublicEventView({ slug }: { slug: string }) {
                     <span>
                       Email <span className="text-rose-600">required</span>
                     </span>
-                    <input className={publicInputClass} type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={event.isFull || reserving} />
+                    <input className={publicInputClass} type="email" autoComplete="email" required value={email} onChange={(event) => { paidIntent.current = null; setEmail(event.target.value); }} disabled={event.isFull || reserving || Boolean(pendingTicketURL)} />
                   </label>
 
                   <label className="mt-4 block space-y-2 text-sm font-semibold text-[#171717]">
                     <span>
                       Display name <span className="text-neutral-500">optional</span>
                     </span>
-                    <input className={publicInputClass} type="text" autoComplete="name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Optional" disabled={event.isFull || reserving} />
+                    <input className={publicInputClass} type="text" autoComplete="name" value={displayName} onChange={(event) => { paidIntent.current = null; setDisplayName(event.target.value); }} placeholder="Optional" disabled={event.isFull || reserving || Boolean(pendingTicketURL)} />
                   </label>
 
-                  <button className={`door-action mt-4 w-full ${publicPrimaryButtonClass}`} type="submit" disabled={reserving || event.isFull}>
+                  <button className={`door-action mt-4 w-full ${publicPrimaryButtonClass}`} type="submit" disabled={reserving || event.isFull || Boolean(pendingTicketURL)}>
                     {publicEventPrimaryCtaLabel(event, reserving)}
                   </button>
 

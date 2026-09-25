@@ -58,7 +58,7 @@ import {
 	loadEventEditorTemplates,
 	loadEventEditorWorkspace,
 } from '../modules/eventEditor/eventEditorLoaders';
-import { canDownloadSettlementExport, downloadSettlementExport } from '../modules/eventEditor/settlementExport';
+import { canDownloadSettlementExport, downloadSettlementExport, downloadSettlementReport } from '../modules/eventEditor/settlementExport';
 import type {
   CommitmentDTO,
   CurrentWorkspaceDTO,
@@ -1036,7 +1036,26 @@ export function EventEditorView({ eventId }: { eventId: string }) {
     try {
       await downloadSettlementExport(event.id);
     } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 403) { setSettlement(null); setSettlementAccessDenied(true); }
       setError(caught instanceof Error ? caught.message : 'Unable to download settlement CSV');
+    } finally {
+      setSettlementExporting(false);
+    }
+  }
+
+  async function handleSettlementReportExport(kind: 'markdown' | 'print') {
+    if (!event || !settlement || !canExportSettlement || settlementExporting) return;
+    setSettlementExporting(true);
+    setMessage(null);
+    setError(null);
+    try {
+      await downloadSettlementReport(event.id, kind);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 403) {
+        setSettlement(null);
+        setSettlementAccessDenied(true);
+      }
+      setError(caught instanceof Error ? caught.message : 'Unable to download settlement report');
     } finally {
       setSettlementExporting(false);
     }
@@ -1501,14 +1520,32 @@ export function EventEditorView({ eventId }: { eventId: string }) {
                   <p className="mt-2 text-sm text-zinc-400">Status: {settlementStatusLabel(settlementFinalized ? 'finalized' : 'open')}</p>
 
                   {canExportSettlement ? (
-                    <button
-                      className="mt-4 rounded-2xl border border-cyan-300/30 bg-cyan-300 px-4 py-3 font-medium text-zinc-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-cyan-300/60"
-                      type="button"
-                      onClick={handleSettlementExport}
-                      disabled={settlementExporting}
-                    >
-                      {settlementExporting ? 'Preparing CSV…' : 'Download settlement CSV'}
-                    </button>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <button
+                        className="rounded-2xl border border-cyan-300/30 bg-cyan-300 px-4 py-3 font-medium text-zinc-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-cyan-300/60"
+                        type="button"
+                        onClick={handleSettlementExport}
+                        disabled={settlementExporting}
+                      >
+                        {settlementExporting ? 'Preparing export…' : 'Download settlement CSV'}
+                      </button>
+                      <button
+                        className="rounded-2xl border border-cyan-300/30 px-4 py-3 disabled:opacity-60"
+                        type="button"
+                        disabled={settlementExporting}
+                        onClick={() => void handleSettlementReportExport('markdown')}
+                      >
+                        Download Markdown report
+                      </button>
+                      <button
+                        className="rounded-2xl border border-cyan-300/30 px-4 py-3 disabled:opacity-60"
+                        type="button"
+                        disabled={settlementExporting}
+                        onClick={() => void handleSettlementReportExport('print')}
+                      >
+                        Download printable HTML
+                      </button>
+                    </div>
                   ) : null}
 
                   {settlementFinalized ? (
@@ -1776,13 +1813,24 @@ export function EventEditorView({ eventId }: { eventId: string }) {
                       </div>
 
                       <label className="block space-y-2 text-sm">
-                        <span className="text-zinc-300">Notes</span>
+                        <span className="text-zinc-300">Operator notes</span>
                         <textarea
                           className="min-h-28 w-full rounded-2xl border border-white/10 bg-zinc-950/60 px-4 py-3 text-white outline-none transition focus:border-sky-300/60 focus:bg-zinc-950/80 disabled:cursor-not-allowed disabled:opacity-60"
                           value={staffingForm.notes}
                           onChange={(event) => setStaffingForm((current) => ({ ...current, notes: event.target.value }))}
                           disabled={staffingActioningId === 'new'}
                         />
+                      </label>
+
+                      <label className="block space-y-2 text-sm">
+                        <span className="text-zinc-300">Participant requirements</span>
+                        <textarea
+                          className="min-h-28 w-full rounded-2xl border border-white/10 bg-zinc-950/60 px-4 py-3 text-white outline-none transition focus:border-sky-300/60 focus:bg-zinc-950/80 disabled:cursor-not-allowed disabled:opacity-60"
+                          value={staffingForm.participantRequirements}
+                          onChange={(event) => setStaffingForm((current) => ({ ...current, participantRequirements: event.target.value }))}
+                          disabled={staffingActioningId === 'new'}
+                        />
+                        <span className="block text-xs leading-5 text-zinc-500">Shared with the assigned person through their participant portal. Keep operator notes separate.</span>
                       </label>
 
                       <div className="grid gap-4 md:grid-cols-2">
@@ -1829,7 +1877,7 @@ export function EventEditorView({ eventId }: { eventId: string }) {
                                   <div className="flex flex-wrap items-start justify-between gap-3">
                                     <div>
                                       <p className="text-sm font-semibold text-white">{item.title}</p>
-                                      <p className="mt-1 text-sm leading-6 text-zinc-400">{item.notes || 'No notes yet.'}</p>
+									  <p className="mt-1 text-sm leading-6 text-zinc-400">{item.notes || 'No operator notes yet.'}</p>
                                     </div>
                                     <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[0.7rem] font-semibold uppercase tracking-[0.28em] text-zinc-200">
                                       {staffingStatusLabel(item.status)}
@@ -1844,6 +1892,22 @@ export function EventEditorView({ eventId }: { eventId: string }) {
 
                                   {canManageStaffing ? (
                                     <div className="mt-4 space-y-3">
+									  <form
+										key={`${item.id}:${item.updatedAt}`}
+										className="space-y-2"
+										onSubmit={(submitEvent) => {
+											submitEvent.preventDefault();
+											const form = new FormData(submitEvent.currentTarget);
+											void handleStaffingUpdate(item.id, { participantRequirements: String(form.get('participantRequirements') ?? '') });
+										}}
+									  >
+										<label className="block space-y-2 text-sm">
+										  <span className="text-zinc-300">Participant requirements</span>
+										  <textarea name="participantRequirements" defaultValue={item.participantRequirements} className="min-h-24 w-full rounded-2xl border border-white/10 bg-zinc-950/60 px-4 py-3 text-white outline-none transition focus:border-sky-300/60 focus:bg-zinc-950/80 disabled:cursor-not-allowed disabled:opacity-60" disabled={staffingActioningId === item.id} />
+										</label>
+										<p className="text-xs leading-5 text-zinc-500">Shared with the assigned person through their participant portal. It is never copied from operator notes.</p>
+										<button className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-zinc-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:bg-white/5" type="submit" disabled={staffingActioningId === item.id}>Save participant requirements</button>
+									  </form>
                                       <form
                                         key={`${item.id}:${item.assignedPersonId ?? item.assignedApplicationId ?? 'none'}`}
                                         className="flex flex-wrap items-end gap-3"

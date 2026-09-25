@@ -40,6 +40,8 @@ Copy the printed `whsec_...` value into `STRIPE_WEBHOOK_SECRET`.
 - `make alpha-qa-paid` skips cleanly when Stripe env vars are missing.
 - Do not treat the browser success redirect as fulfillment; the signed webhook is the source of truth.
 - A paid reservation first records a local checkout attempt and its Stripe idempotency key. If the provider request times out or saving its response fails, the ticket stays pending and the attempt is marked `unknown`; do not retry by creating a second checkout session. Reconcile the existing attempt with Stripe using its stored idempotency key, then replay the signed webhook.
+- The public checkout form sends one opaque purchase-intent key while its purchaser details stay unchanged. A repeat request finds the same durable attempt: a ready attempt returns its saved Checkout URL, while `creating` or `unknown` returns a pending-reconciliation result and makes no provider request. Changing the form starts a new intent. This is not an automatic provider retry or a recovery-window policy.
+- The browser keeps that key only for its current page session. Reload recovery, provider idempotency retention windows, and an operator recovery policy remain separate work; a reload must not be presented as a safe automatic retry.
 - A signed callback is accepted only when its ticket, checkout attempt, provider session, amount, and currency agree with the durable record. The webhook ledger retains an `anomalous` outcome for mismatches.
 - This runbook uses Stripe test mode only. Automated tests use fakes and must never invoke Stripe, the Stripe CLI, or a retained application database.
 

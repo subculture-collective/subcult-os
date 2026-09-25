@@ -16,14 +16,15 @@ type participantPortalDTO struct {
 }
 
 type participantAssignmentDTO struct {
-	EventID        string  `json:"eventId"`
-	EventTitle     string  `json:"eventTitle"`
-	StaffingItemID string  `json:"staffingItemId"`
-	Title          string  `json:"title"`
-	Kind           string  `json:"kind"`
-	StartsAt       *string `json:"startsAt,omitempty"`
-	EndsAt         *string `json:"endsAt,omitempty"`
-	Status         string  `json:"status"`
+	EventID                 string  `json:"eventId"`
+	EventTitle              string  `json:"eventTitle"`
+	StaffingItemID          string  `json:"staffingItemId"`
+	Title                   string  `json:"title"`
+	Kind                    string  `json:"kind"`
+	StartsAt                *string `json:"startsAt,omitempty"`
+	EndsAt                  *string `json:"endsAt,omitempty"`
+	Status                  string  `json:"status"`
+	ParticipantRequirements string  `json:"participantRequirements"`
 }
 
 type participantCommitmentDTO struct {
@@ -82,7 +83,7 @@ func (a *App) loadParticipantPortal(ctx context.Context, personID string) (parti
 	}
 	assignments, err := a.db.Query(ctx, `
 		select e.workspace_id, e.id, e.title, esi.id, esi.title, esi.kind,
-		       esi.starts_at, esi.ends_at, esi.status
+		       esi.starts_at, esi.ends_at, esi.status, esi.participant_requirements
 		from event_staffing_items esi
 		join events e on e.id = esi.event_id
 		join workspace_members wm on wm.workspace_id = e.workspace_id
@@ -103,7 +104,7 @@ func (a *App) loadParticipantPortal(ctx context.Context, personID string) (parti
 		var assignment participantAssignmentDTO
 		var startsAt, endsAt sql.NullTime
 		if err := assignments.Scan(&workspaceID, &assignment.EventID, &assignment.EventTitle, &assignment.StaffingItemID,
-			&assignment.Title, &assignment.Kind, &startsAt, &endsAt, &assignment.Status); err != nil {
+			&assignment.Title, &assignment.Kind, &startsAt, &endsAt, &assignment.Status, &assignment.ParticipantRequirements); err != nil {
 			return participantPortalLoad{}, err
 		}
 		assignment.StartsAt = participantPortalTime(startsAt)

@@ -87,7 +87,7 @@ export default function RunOfShowScreen() {
     setError(null);
     try {
       if (editingID) {
-        const updated = await updateEventStaffing(eventID, editingID, buildUpdateRunOfShowPayload({ title, notes: form.notes }, startsAt, endsAt));
+		const updated = await updateEventStaffing(eventID, editingID, buildUpdateRunOfShowPayload({ title, notes: form.notes, participantRequirements: form.participantRequirements }, startsAt, endsAt));
         setItems((current) => sortRunOfShowItems(current.map((candidate) => (candidate.id === updated.id ? updated : candidate))));
         stopEditing();
       } else {
@@ -108,6 +108,7 @@ export default function RunOfShowScreen() {
       title: item.title,
       kind: item.kind,
       notes: item.notes,
+		participantRequirements: item.participantRequirements,
       startsAt: toRunOfShowInputValue(item.startsAt),
       endsAt: toRunOfShowInputValue(item.endsAt),
     });
@@ -144,6 +145,14 @@ export default function RunOfShowScreen() {
             placeholderTextColor="#a3a3a3"
             style={styles.input}
           />
+		  <TextInput
+			value={form.participantRequirements}
+			onChangeText={(value) => setForm((current) => ({ ...current, participantRequirements: value }))}
+			placeholder="Participant requirements (shared with the assigned person through their participant portal)"
+			placeholderTextColor="#a3a3a3"
+			multiline
+			style={[styles.input, styles.notesInput]}
+		  />
           <View style={styles.kindRow}>
             <KindButton label="Task" selected={form.kind === 'task'} disabled={Boolean(editingID)} onPress={() => setForm((current) => ({ ...current, kind: 'task' }))} />
             <KindButton label="Shift" selected={form.kind === 'shift'} disabled={Boolean(editingID)} onPress={() => setForm((current) => ({ ...current, kind: 'shift' }))} />

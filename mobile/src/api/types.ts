@@ -107,6 +107,7 @@ export interface PaidReservationDTO {
   ticketUrl: string;
   checkoutSessionId: string;
   checkoutUrl: string;
+  checkoutStatus: 'ready' | 'paid' | 'pending_reconciliation' | 'expired' | 'reconciliation_required';
 }
 
 export type WorkspaceRole = 'owner' | 'member';
@@ -158,6 +159,7 @@ export interface EventStaffingItemDTO {
   title: string;
   kind: 'task' | 'shift';
   notes: string;
+  participantRequirements: string;
   startsAt: string | null;
   endsAt: string | null;
   assignedPersonId: string | null;
@@ -214,4 +216,16 @@ export interface PublicArchiveItemDTO {
   unavailableReason: string;
   approvedAt: string;
   createdAt: string;
+}
+
+export interface ParticipantAssignmentDTO {
+  eventId: string;
+  eventTitle: string;
+  staffingItemId: string;
+  title: string;
+  kind: 'task' | 'shift';
+  startsAt?: string | null;
+  endsAt?: string | null;
+  status: 'open' | 'assigned' | 'completed';
+  participantRequirements: string;
 }

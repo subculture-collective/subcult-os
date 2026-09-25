@@ -18,7 +18,7 @@ import (
 
 const (
 	migrationLockID      int64 = 0x53554243554c54
-	minimumSchemaVersion       = 18
+	minimumSchemaVersion       = 21
 )
 
 var migrationFilename = regexp.MustCompile(`^(\d{6})_([a-z0-9_]+)\.sql$`)

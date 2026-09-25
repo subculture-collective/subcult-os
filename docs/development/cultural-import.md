@@ -96,18 +96,36 @@ transaction. A preview with parser errors can be retained for review when its
 source assertion is valid. An invalid source assertion is rejected before a
 preview header or any child row is created.
 
-## Remaining IMPORT-01 work
+## Applying an explicit action
 
-An apply slice must create or correct canonical records only after an operator
-chooses each candidate. It must not silently overwrite a canonical event. A
-correction needs its target ID, a field diff, and the target's current revision
-token. It must record append-only provenance.
+`GET /api/workspaces/{workspaceID}/cultural-imports/{importID}` reloads a saved
+preview. `POST /api/workspaces/{workspaceID}/cultural-imports/apply` accepts a
+candidate ID, one explicitly selected workspace event, and either `create` or
+`correction`. Matches remain hints: the API never derives an event, occurrence,
+or place from a title or timestamp.
 
-A rollback slice must distinguish a newly created, unchanged and unreferenced
-record from a record with later edits or dependent work. It may delete only the
-former. Other outcomes need an explicit compensating correction or
-cancellation. Neither importing nor correction may create consent, schedule an
-announcement, or publish a public record.
+A create makes one occurrence in the selected existing event with `place_id`
+null. It cannot create an event or place. A correction requires the selected
+occurrence in that selected event, a nonempty allowlisted field set, and its
+`expectedUpdatedAt`; `expectedPublicCid` is an optional additional CAS token.
+Only name, description, start, end, timezone, and status are writable. Public
+URI/CID values are preserved, and the occurrence revision advances
+monotonically. A preview with parser errors requires `acknowledgeErrors: true`.
+
+The action transaction locks the candidate, selected event, and selected
+occurrence before mutation, then stores the source ID/digest, candidate row,
+selected-field diff, before/after snapshots, expected tokens, actor, and time
+in `cultural_import_actions`. The candidate has a unique ledger action, so a
+second apply is refused. Authority is checked at request entry, the write
+boundary, and before the response. The action never changes consent,
+announcements, payments, providers, or publication state.
+
+`POST /api/workspaces/{workspaceID}/cultural-import-actions/{actionID}/rollback`
+can delete only a created occurrence whose revision is still the import
+revision, whose public URI/CID are empty, which has no credits, and which is
+not referenced by another active import action. The ledger action remains with
+the rollback actor, time, and outcome. Corrections are never deleted; they need
+an explicit compensating correction.
 
 A remote API adapter is out of scope until the operator selects a source and
 defines its authority, credential, URL, rate-limit, pagination, failure, and
@@ -126,7 +144,7 @@ go test -race ./internal/culturalimport -count=1
 The parser tests cover normalized DST instants, source assertions, malformed and
 sensitive headers, invalid UTF-8, size and row limits, formula-like text,
 invalid time/status/zone values, duplicate source IDs, and errors that do not
-contain input text. These tests prove parser behavior only. Separate PostgreSQL
-integration coverage proves only the private review ledger and match boundaries;
-it does not prove apply, correction or rollback behavior because those actions
-do not exist.
+contain input text. PostgreSQL integration coverage additionally exercises
+explicit create/correction actions, stale-revision rejection, one-action
+idempotency, create rollback, correction rollback refusal, and the 18-to-19
+upgrade path. It does not prove a public publication or provider workflow.

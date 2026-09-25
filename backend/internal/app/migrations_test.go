@@ -162,6 +162,53 @@ func TestRunMigrationsRollsBackFailedVersion(t *testing.T) {
 	}
 }
 
+func TestStaffingParticipantRequirementsMigrationUpgradesVersionTwentyFixture(t *testing.T) {
+	ctx := t.Context()
+	pool := newMigrationTestPool(t)
+	migrations, err := loadMigrations(migrationFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(migrations) < 21 {
+		t.Fatalf("migrations=%d, want version 21", len(migrations))
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `create table schema_migrations(version integer primary key,name text not null,checksum char(64) not null,applied_at timestamptz not null default now())`); err != nil {
+		t.Fatal(err)
+	}
+	for _, migration := range migrations[:20] {
+		if _, err := tx.Exec(ctx, migration.SQL); err != nil {
+			t.Fatalf("apply historical migration %d: %v", migration.Version, err)
+		}
+		if _, err := tx.Exec(ctx, `insert into schema_migrations(version,name,checksum) values($1,$2,$3)`, migration.Version, migration.Name, migration.Checksum); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatalf("upgrade version-20 fixture: %v", err)
+	}
+	var isNullable, defaultValue string
+	if err := pool.QueryRow(ctx, `
+		select is_nullable, column_default
+		from information_schema.columns
+		where table_schema = current_schema()
+		  and table_name = 'event_staffing_items'
+		  and column_name = 'participant_requirements'
+	`).Scan(&isNullable, &defaultValue); err != nil {
+		t.Fatal(err)
+	}
+	if isNullable != "NO" || defaultValue != "''::text" {
+		t.Fatalf("participant requirements column nullable=%q default=%q, want NO and empty text", isNullable, defaultValue)
+	}
+}
+
 func TestRunMigrationsSerializesConcurrentRunners(t *testing.T) {
 	pool := newMigrationTestPool(t)
 	ctx := t.Context()

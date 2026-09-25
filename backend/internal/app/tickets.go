@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type publicEventDTO struct {
@@ -58,8 +60,9 @@ type doorTicketDTO struct {
 }
 
 type reserveTicketRequest struct {
-	Email       string  `json:"email"`
-	DisplayName *string `json:"displayName"`
+	Email             string  `json:"email"`
+	DisplayName       *string `json:"displayName"`
+	PurchaseIntentKey *string `json:"purchaseIntentKey"`
 }
 
 type createTestTicketRequest struct {
@@ -91,6 +94,7 @@ type paidReservationResponse struct {
 	TicketURL         string `json:"ticketUrl"`
 	CheckoutSessionID string `json:"checkoutSessionId"`
 	CheckoutURL       string `json:"checkoutUrl"`
+	CheckoutStatus    string `json:"checkoutStatus"`
 }
 
 func (a *App) handlePublicEvent(w http.ResponseWriter, r *http.Request) {
@@ -248,6 +252,23 @@ func (a *App) handleCreatePaidReservation(w http.ResponseWriter, r *http.Request
 		return
 	}
 	displayName := normalizeDisplayName(req.DisplayName)
+	purchaseIntentKey := uuid.NewString()
+	if req.PurchaseIntentKey != nil {
+		if strings.TrimSpace(*req.PurchaseIntentKey) == "" {
+			writeError(w, http.StatusBadRequest, "invalid purchase intent")
+			return
+		}
+		parsed, err := uuid.Parse(strings.TrimSpace(*req.PurchaseIntentKey))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid purchase intent")
+			return
+		}
+		purchaseIntentKey = parsed.String()
+	}
+	displayNameValue := ""
+	if displayName != nil {
+		displayNameValue = *displayName
+	}
 
 	tx, err := a.db.Begin(r.Context())
 	if err != nil {
@@ -273,6 +294,18 @@ func (a *App) handleCreatePaidReservation(w http.ResponseWriter, r *http.Request
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "could not load event")
+		return
+	}
+	if existing, found, err := loadPaidPurchaseIntent(r.Context(), tx, purchaseIntentKey); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load purchase intent")
+		return
+	} else if found {
+		if existing.EventID != event.ID || existing.Email != email || existing.DisplayName != displayNameValue || existing.AmountCents != event.TicketPriceCents || !strings.EqualFold(existing.Currency, event.TicketCurrency) {
+			writeError(w, http.StatusConflict, "purchase intent conflicts with an existing checkout")
+			return
+		}
+		status, response := existing.response(a.publicTicketURL(existing.TicketCode))
+		writeJSON(w, status, response)
 		return
 	}
 	if event.ReservedCount, err = loadReservedTicketCount(r.Context(), tx, event.ID); err != nil {
@@ -308,10 +341,15 @@ func (a *App) handleCreatePaidReservation(w http.ResponseWriter, r *http.Request
 	// its follow-up persistence is ambiguous.
 	var attemptID, idempotencyKey string
 	if err := tx.QueryRow(r.Context(), `
-		insert into payment_checkout_attempts (ticket_id, provider, provider_idempotency_key)
-		values ($1, 'stripe', 'checkout-attempt-' || gen_random_uuid()::text)
+		insert into payment_checkout_attempts (ticket_id, provider, provider_idempotency_key, purchase_intent_key)
+		values ($1, 'stripe', 'checkout-attempt-' || gen_random_uuid()::text, $2)
 		returning id, provider_idempotency_key
-	`, ticket.ID).Scan(&attemptID, &idempotencyKey); err != nil {
+	`, ticket.ID, purchaseIntentKey).Scan(&attemptID, &idempotencyKey); err != nil {
+		var databaseError *pgconn.PgError
+		if errors.As(err, &databaseError) && databaseError.Code == "23505" {
+			writeError(w, http.StatusConflict, "purchase intent conflicts with an existing checkout")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "could not create checkout attempt")
 		return
 	}
@@ -354,7 +392,7 @@ func (a *App) handleCreatePaidReservation(w http.ResponseWriter, r *http.Request
 		_ = bindTx.Rollback(r.Context())
 		var alreadyPaid bool
 		if lookupErr := a.db.QueryRow(r.Context(), `select exists (select 1 from tickets where id = $1 and payment_status = 'paid' and stripe_checkout_session_id = $2)`, ticket.ID, checkout.ID).Scan(&alreadyPaid); lookupErr == nil && alreadyPaid {
-			writeJSON(w, http.StatusOK, paidReservationResponse{TicketID: ticket.ID, TicketCode: ticket.Code, TicketURL: ticketURL, CheckoutSessionID: checkout.ID, CheckoutURL: checkout.URL})
+			writeJSON(w, http.StatusOK, paidReservationResponse{TicketID: ticket.ID, TicketCode: ticket.Code, TicketURL: ticketURL, CheckoutSessionID: checkout.ID, CheckoutURL: checkout.URL, CheckoutStatus: "paid"})
 			return
 		}
 		a.markCheckoutAttemptUnknown(r.Context(), attemptID, "persistence_failed")
@@ -364,11 +402,11 @@ func (a *App) handleCreatePaidReservation(w http.ResponseWriter, r *http.Request
 	var boundAttemptID string
 	err = bindTx.QueryRow(r.Context(), `
 		update payment_checkout_attempts a
-		set provider_session_id = $2, status = 'ready', ready_at = now(), updated_at = now(), last_error_code = null
-		where a.id = $1 and a.ticket_id = $3 and a.provider = 'stripe'
+		set provider_session_id = $2, provider_checkout_url = $3, status = 'ready', ready_at = now(), updated_at = now(), last_error_code = null
+		where a.id = $1 and a.ticket_id = $4 and a.provider = 'stripe'
 		  and a.status in ('creating', 'unknown')
 		returning a.id
-	`, attemptID, checkout.ID, ticket.ID).Scan(&boundAttemptID)
+	`, attemptID, checkout.ID, checkout.URL, ticket.ID).Scan(&boundAttemptID)
 	if err == nil {
 		_, err = bindTx.Exec(r.Context(), `update tickets set stripe_checkout_session_id = $2 where id = $1 and stripe_checkout_session_id is null`, ticket.ID, checkout.ID)
 	}
@@ -399,7 +437,63 @@ func (a *App) handleCreatePaidReservation(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, paidReservationResponse{TicketID: ticket.ID, TicketCode: ticket.Code, TicketURL: ticketURL, CheckoutSessionID: checkout.ID, CheckoutURL: checkout.URL})
+	writeJSON(w, http.StatusOK, paidReservationResponse{TicketID: ticket.ID, TicketCode: ticket.Code, TicketURL: ticketURL, CheckoutSessionID: checkout.ID, CheckoutURL: checkout.URL, CheckoutStatus: "ready"})
+}
+
+type paidPurchaseIntent struct {
+	EventID, Email, DisplayName, TicketID, TicketCode, Currency, Status, SessionID, CheckoutURL string
+	AmountCents                                                                                 int
+}
+
+// loadPaidPurchaseIntent locks an existing purchase command before capacity is
+// considered. A retry never invokes the provider: creating and unknown work
+// remains pending reconciliation because its external outcome is uncertain.
+func loadPaidPurchaseIntent(ctx context.Context, tx pgx.Tx, key string) (paidPurchaseIntent, bool, error) {
+	var intent paidPurchaseIntent
+	var ticketID string
+	err := tx.QueryRow(ctx, `select ticket_id from payment_checkout_attempts where purchase_intent_key = $1`, key).Scan(&ticketID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return paidPurchaseIntent{}, false, nil
+	}
+	if err != nil {
+		return paidPurchaseIntent{}, false, err
+	}
+	if err := tx.QueryRow(ctx, `
+		select event_id, email, coalesce(display_name, ''), id, code, amount_cents, currency
+		from tickets where id = $1 for update
+	`, ticketID).Scan(&intent.EventID, &intent.Email, &intent.DisplayName, &intent.TicketID, &intent.TicketCode, &intent.AmountCents, &intent.Currency); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return paidPurchaseIntent{}, false, nil
+		}
+		return paidPurchaseIntent{}, false, err
+	}
+	err = tx.QueryRow(ctx, `
+		select status, coalesce(provider_session_id, ''), coalesce(provider_checkout_url, '')
+		from payment_checkout_attempts where purchase_intent_key = $1 and ticket_id = $2 for update
+	`, key, ticketID).Scan(&intent.Status, &intent.SessionID, &intent.CheckoutURL)
+	return intent, err == nil, err
+}
+
+func (intent paidPurchaseIntent) response(ticketURL string) (int, paidReservationResponse) {
+	response := paidReservationResponse{TicketID: intent.TicketID, TicketCode: intent.TicketCode, TicketURL: ticketURL, CheckoutSessionID: intent.SessionID}
+	switch intent.Status {
+	case "ready":
+		if intent.CheckoutURL != "" {
+			response.CheckoutURL, response.CheckoutStatus = intent.CheckoutURL, "ready"
+			return http.StatusOK, response
+		}
+	case "fulfilled":
+		response.CheckoutStatus = "paid"
+		return http.StatusOK, response
+	case "expired":
+		response.CheckoutStatus = "expired"
+		return http.StatusConflict, response
+	case "anomalous":
+		response.CheckoutStatus = "reconciliation_required"
+		return http.StatusConflict, response
+	}
+	response.CheckoutStatus = "pending_reconciliation"
+	return http.StatusAccepted, response
 }
 
 func (a *App) markCheckoutAttemptUnknown(ctx context.Context, attemptID, errorCode string) {

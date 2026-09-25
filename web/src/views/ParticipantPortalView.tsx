@@ -80,6 +80,7 @@ export function ParticipantPortalView() {
               {portal.assignments.map((assignment) => <li key={assignment.staffingItemId} className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
                 <div className="flex items-start justify-between gap-3"><div><p className="font-bold text-[#171717]">{assignment.title}</p><p className={publicMutedTextClass}>{assignment.eventTitle} · {assignment.kind}</p></div><span className={publicStatusPillClass(statusTone(assignment.status))}>{assignment.status}</span></div>
                 <p className={`mt-3 ${publicMutedTextClass}`}>{formatDateTime(assignment.startsAt)}{assignment.endsAt ? ` – ${formatDateTime(assignment.endsAt)}` : ''}</p>
+				{assignment.participantRequirements ? <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50 p-3 text-sm leading-6 text-sky-950"><p className="font-bold">Requirements</p><p className="mt-1 whitespace-pre-wrap">{assignment.participantRequirements}</p></div> : null}
               </li>)}
             </ul>}
           </section>

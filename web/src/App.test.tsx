@@ -75,7 +75,7 @@ describe('participant portal', () => {
   it('renders person-linked assignments and commitments without private operator fields', () => {
     const rendered = renderWithState('/participant', <ParticipantPortalView />, [{
       assignments: [{
-        eventId: 'event-1', eventTitle: 'Night Market', staffingItemId: 'staffing-1', title: 'Soundcheck', kind: 'shift', startsAt: '2026-07-01T18:00:00Z', endsAt: '2026-07-01T19:00:00Z', status: 'assigned',
+        eventId: 'event-1', eventTitle: 'Night Market', staffingItemId: 'staffing-1', title: 'Soundcheck', kind: 'shift', startsAt: '2026-07-01T18:00:00Z', endsAt: '2026-07-01T19:00:00Z', status: 'assigned', participantRequirements: 'Bring a DI and arrive early.',
       }],
       commitments: [{
         id: 'commitment-1', eventId: 'event-1', eventTitle: 'Night Market', title: 'Bring cables', dueAt: '2026-07-01T17:00:00Z', status: 'open',
@@ -84,6 +84,7 @@ describe('participant portal', () => {
 
     expect(rendered).toContain('Your event work');
     expect(rendered).toContain('Soundcheck');
+		expect(rendered).toContain('Bring a DI and arrive early.');
     expect(rendered).toContain('Bring cables');
     expect(rendered).not.toContain('operator-only staffing note');
     expect(rendered).not.toContain('application-private-message');
@@ -2418,6 +2419,20 @@ describe('App routes', () => {
 		expect(rendered).toContain('Secure checkout');
 		expect(rendered).not.toContain('Stripe Checkout');
 	});
+
+  it('fences a pending paid checkout and retains its ticket-status link', () => {
+    const event = {
+      id: 'event-1', workspaceId: 'workspace-1', title: 'Night Market', startsAt: '2026-06-13T23:00:00.000Z', publicDescription: 'A late set.', locationDisplay: 'The Hall', ticketAllocation: 100,
+      pricingMode: 'fixed', ticketPriceCents: 1800, ticketCurrency: 'usd', reservedCount: 12, checkedInCount: 0, status: 'published', publicSlug: 'night-market', publicUrl: '/e/night-market', remainingTickets: 88, isFull: false,
+    };
+    const rendered = renderWithState('/e/night-market', <PublicEventView slug="night-market" />, [event, 'guest@example.test', 'Guest', false, false, 'This checkout needs reconciliation.', null, [], {}, true, '/tickets/pending']);
+    expect(rendered).toContain('This checkout needs reconciliation.');
+    expect(rendered).toContain('href="/tickets/pending"');
+    const ticketFormInputs = rendered.match(/<input\b[^>]*>/g) ?? [];
+    expect(ticketFormInputs.filter((input) => input.includes('autoComplete="email"') || input.includes('autoComplete="name"')).every((input) => input.includes('disabled=""'))).toBe(true);
+    const submit = (rendered.match(/<button\b[^>]*>Buy ticket<\/button>/g) ?? [])[0];
+    expect(submit).toContain('disabled=""');
+  });
 
   it('renders the public sold-out ticket CTA', () => {
     const event = {

@@ -1481,13 +1481,14 @@ func TestEventStaffingCreateAPI(t *testing.T) {
 	}, http.StatusForbidden)
 
 	createdTask := postJSON(t, fx.app, fx.ownerCookie, "/api/events/"+eventID+"/staffing", map[string]any{
-		"title": "  Opening checklist  ",
-		"kind":  "task",
-		"notes": "  Check lights and radios.  ",
+		"title":                   "  Opening checklist  ",
+		"kind":                    "task",
+		"notes":                   "  Check lights and radios.  ",
+		"participantRequirements": "  Bring a radio and check in with the stage manager.  ",
 	}, http.StatusOK)
 	task := mustObject(t, createdTask.JSON)
 	taskID := mustString(t, createdTask.JSON, "id")
-	if task["eventId"] != eventID || task["title"] != "Opening checklist" || task["kind"] != "task" || task["notes"] != "Check lights and radios." || task["status"] != "open" || task["createdAt"] == "" || task["updatedAt"] == "" {
+	if task["eventId"] != eventID || task["title"] != "Opening checklist" || task["kind"] != "task" || task["notes"] != "Check lights and radios." || task["participantRequirements"] != "Bring a radio and check in with the stage manager." || task["status"] != "open" || task["createdAt"] == "" || task["updatedAt"] == "" {
 		t.Fatalf("unexpected created task response: %#v", task)
 	}
 	for _, field := range []string{"startsAt", "endsAt", "assignedPersonId", "assignedApplicationId", "assigneeName", "completedAt", "completedByPersonId"} {
@@ -1539,6 +1540,7 @@ func TestEventStaffingCreateAPI(t *testing.T) {
 		{"title": "Invalid kind", "kind": "job"},
 		{"title": "Bad dates", "kind": "shift", "startsAt": "2026-07-01T22:00:00Z", "endsAt": "2026-07-01T20:00:00Z"},
 		{"title": "Long notes", "kind": "task", "notes": strings.Repeat("a", 2001)},
+		{"title": "Long participant requirements", "kind": "task", "participantRequirements": strings.Repeat("a", 2001)},
 	} {
 		postJSON(t, fx.app, fx.ownerCookie, "/api/events/"+eventID+"/staffing", payload, http.StatusBadRequest)
 	}
@@ -1564,7 +1566,7 @@ func TestEventStaffingCreateAPI(t *testing.T) {
 		entry := mustObject(t, item)
 		byTitle[entry["title"].(string)] = entry
 	}
-	if byTitle["Opening checklist"]["notes"] != "Check lights and radios." || byTitle["Front door shift"]["notes"] != "Volunteer at the front door." || byTitle["Front door shift"]["startsAt"] != "2026-07-01T20:00:00Z" {
+	if byTitle["Opening checklist"]["notes"] != "Check lights and radios." || byTitle["Opening checklist"]["participantRequirements"] != "Bring a radio and check in with the stage manager." || byTitle["Front door shift"]["notes"] != "Volunteer at the front door." || byTitle["Front door shift"]["participantRequirements"] != "" || byTitle["Front door shift"]["startsAt"] != "2026-07-01T20:00:00Z" {
 		t.Fatalf("unexpected staffing list after creation: %#v", ownerAfter.JSON)
 	}
 }
@@ -1690,8 +1692,16 @@ func TestEventStaffingUpdateAPI(t *testing.T) {
 	ownerID := ownerPersonID(t, fx)
 	memberEmail := fx.email("member")
 
-	item := postJSON(t, fx.app, fx.ownerCookie, "/api/events/"+eventID+"/staffing", map[string]any{"title": "Opening checklist", "kind": "task", "notes": "Check lights and radios."}, http.StatusOK)
+	item := postJSON(t, fx.app, fx.ownerCookie, "/api/events/"+eventID+"/staffing", map[string]any{"title": "Opening checklist", "kind": "task", "notes": "Check lights and radios.", "participantRequirements": "Wear closed-toe shoes."}, http.StatusOK)
 	taskID := mustString(t, item.JSON, "id")
+	if got := mustObject(t, item.JSON)["participantRequirements"]; got != "Wear closed-toe shoes." {
+		t.Fatalf("created participant requirements=%#v", got)
+	}
+	updatedRequirements := patchJSON(t, fx.app, fx.ownerCookie, "/api/events/"+eventID+"/staffing/"+taskID, map[string]any{"participantRequirements": "Bring ear protection."}, http.StatusOK)
+	if got := mustObject(t, updatedRequirements.JSON)["participantRequirements"]; got != "Bring ear protection." {
+		t.Fatalf("updated participant requirements=%#v", got)
+	}
+	patchJSON(t, fx.app, fx.ownerCookie, "/api/events/"+eventID+"/staffing/"+taskID, map[string]any{"participantRequirements": strings.Repeat("a", 2001)}, http.StatusBadRequest)
 
 	assignedMember := patchJSON(t, fx.app, fx.ownerCookie, "/api/events/"+eventID+"/staffing/"+taskID, map[string]any{"assignedPersonId": memberID}, http.StatusOK)
 	assignedMemberObj := mustObject(t, assignedMember.JSON)

@@ -1,10 +1,10 @@
-# Event settlement CSV export (EXPORT-01)
+# Event settlement exports (EXPORT-01)
 
 Status: private finance export implemented as the first bounded EXPORT-01
 slice. It exports the existing closeout settlement and its append-only
 corrections. It does not implement a budget, accounts payable, an accounting
-provider adapter, a public export, Markdown, PDF, or a general event-data
-export.
+provider adapter, a public export, server-generated PDF, or a general event-data
+export. Markdown and printable HTML render the same private settlement snapshot.
 
 ## Route and access
 
@@ -12,9 +12,18 @@ export.
 `event-settlement.csv` with `Content-Type: text/csv; charset=utf-8`,
 `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`.
 
-The route requires the workspace `finance` permission. The current authority
+`GET /api/events/{eventID}/exports/settlement.md` downloads a UTF-8 Markdown
+report. `GET /api/events/{eventID}/exports/settlement-print.html` downloads a
+self-contained printable HTML report. Open the HTML locally and use the
+browser's Print / Save as PDF function when needed. This is not a server PDF
+endpoint. Both formats preserve report, settlement and correction identifiers,
+actor IDs, UTC dates, finalization status and exact monetary totals. Markdown
+escapes untrusted text; HTML uses automatic template escaping and a restrictive
+content security policy with no remote assets or scripts.
+
+Every route requires the workspace `finance` permission. The current authority
 matrix gives that permission to `owner` and `finance` roles. Organizer, crew,
-door, inactive, revoked and unauthenticated sessions are denied. The route is
+door, inactive, revoked and unauthenticated sessions are denied. The routes are
 not public and no public projection reads its data.
 
 ## Contents and consistency
@@ -53,6 +62,6 @@ or a control character.
 
 The current stored model contains actual paid-ticket settlement counts and
 corrections. It does not contain a budget or payable-obligation ledger, so the
-CSV makes no budget/payable claim. A selected accounting format, Markdown/PDF
-report rendering, any separate operational report scope, accounting-user
-validation and production qualification remain future work.
+reports make no budget/payable claim. A selected accounting format, server PDF
+generation, any separate operational report scope, accounting-user validation
+and production qualification remain future work.

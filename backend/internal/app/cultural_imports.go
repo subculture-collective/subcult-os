@@ -26,12 +26,13 @@ type culturalImportPreviewRequest struct {
 }
 
 type culturalImportMatchDTO struct {
-	OccurrenceID string    `json:"occurrenceId"`
-	EventID      string    `json:"eventId"`
-	Name         string    `json:"name"`
-	StartsAt     string    `json:"startsAt"`
-	Status       string    `json:"status"`
-	UpdatedAt    time.Time `json:"-"`
+	OccurrenceID string `json:"occurrenceId"`
+	EventID      string `json:"eventId"`
+	Name         string `json:"name"`
+	StartsAt     string `json:"startsAt"`
+	Status       string `json:"status"`
+	UpdatedAt    string `json:"updatedAt"`
+	updatedAt    time.Time
 }
 
 type culturalImportCandidateDTO struct {
@@ -68,6 +69,7 @@ type culturalImportPreviewDTO struct {
 	CreatedAt     string                          `json:"createdAt"`
 	Candidates    []culturalImportCandidateDTO    `json:"candidates"`
 	Errors        []culturalImportPreviewErrorDTO `json:"errors"`
+	Actions       []culturalImportActionDTO       `json:"actions"`
 }
 
 func (a *App) handleCreateCulturalImportPreview(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +149,7 @@ func persistCulturalImportPreview(ctx context.Context, tx pgx.Tx, workspaceID, a
 		ContentSHA256: preview.ContentSHA256,
 		Candidates:    []culturalImportCandidateDTO{},
 		Errors:        []culturalImportPreviewErrorDTO{},
+		Actions:       []culturalImportActionDTO{},
 	}
 	var createdAt time.Time
 	err := tx.QueryRow(ctx, `
@@ -217,11 +220,12 @@ func persistCulturalImportPreview(ctx context.Context, tx pgx.Tx, workspaceID, a
 		for rows.Next() {
 			var match culturalImportMatchDTO
 			var matchStartsAt time.Time
-			if err := rows.Scan(&match.OccurrenceID, &match.EventID, &match.Name, &matchStartsAt, &match.Status, &match.UpdatedAt); err != nil {
+			if err := rows.Scan(&match.OccurrenceID, &match.EventID, &match.Name, &matchStartsAt, &match.Status, &match.updatedAt); err != nil {
 				rows.Close()
 				return culturalImportPreviewDTO{}, err
 			}
 			match.StartsAt = matchStartsAt.UTC().Format(time.RFC3339Nano)
+			match.UpdatedAt = match.updatedAt.UTC().Format(time.RFC3339Nano)
 			matches = append(matches, match)
 		}
 		if err := rows.Err(); err != nil {
@@ -244,7 +248,7 @@ func persistCulturalImportPreview(ctx context.Context, tx pgx.Tx, workspaceID, a
 				insert into cultural_import_candidate_matches
 					(candidate_id, workspace_id, occurrence_id, occurrence_id_snapshot, event_id_snapshot, name_snapshot, starts_at_snapshot, status_snapshot, updated_at_snapshot)
 				values ($1, $2, $3, $3, $4, $5, $6, $7, $8)
-			`, stored.ID, workspaceID, match.OccurrenceID, match.EventID, match.Name, match.StartsAt, match.Status, match.UpdatedAt); err != nil {
+			`, stored.ID, workspaceID, match.OccurrenceID, match.EventID, match.Name, match.StartsAt, match.Status, match.updatedAt); err != nil {
 				return culturalImportPreviewDTO{}, err
 			}
 		}

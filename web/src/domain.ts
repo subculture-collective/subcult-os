@@ -23,6 +23,7 @@ export interface ParticipantAssignmentDTO {
   startsAt?: string | null;
   endsAt?: string | null;
   status: 'open' | 'assigned' | 'completed';
+  participantRequirements: string;
 }
 
 export interface ParticipantCommitmentDTO {
@@ -216,6 +217,53 @@ export interface EventDTO {
   publicUrl: string | null;
 }
 
+export interface CulturalImportMatchDTO {
+  occurrenceId: string;
+  eventId: string;
+  name: string;
+  startsAt: string;
+  status: string;
+  updatedAt: string;
+}
+
+export interface CulturalImportCandidateDTO {
+  id: string;
+  row: number;
+  sourceRecordId: string;
+  title: string;
+  description?: string;
+  startsAt: string;
+  endsAt?: string;
+  timezone: string;
+  status: string;
+  matches: CulturalImportMatchDTO[];
+  ambiguous: boolean;
+  matchesTruncated: boolean;
+}
+
+export interface CulturalImportPreviewDTO {
+  id: string;
+  workspaceId: string;
+  schema: string;
+  sourceId: string;
+  contentSha256: string;
+  createdAt: string;
+  candidates: CulturalImportCandidateDTO[];
+  errors: Array<{ row: number; field?: string; code: string }>;
+  actions: CulturalImportActionDTO[];
+}
+
+export interface CulturalImportActionDTO {
+  id: string;
+  candidateId: string;
+  mode: 'create' | 'correction';
+  eventId: string;
+  occurrenceId?: string;
+  createdOccurrenceId?: string;
+  appliedAt: string;
+  rolledBackAt?: string;
+}
+
 export interface PublicEventDTO {
   id: string;
   title: string;
@@ -320,6 +368,7 @@ export interface EventStaffingItemDTO {
   title: string;
   kind: 'task' | 'shift';
   notes: string;
+  participantRequirements: string;
   startsAt?: string | null;
   endsAt?: string | null;
   assignedPersonId?: string | null;
@@ -336,6 +385,7 @@ export interface CreateEventStaffingRequestDTO {
   title: string;
   kind: 'task' | 'shift';
   notes: string;
+  participantRequirements?: string;
   startsAt?: string | null;
   endsAt?: string | null;
 }
@@ -343,6 +393,7 @@ export interface CreateEventStaffingRequestDTO {
 export interface UpdateEventStaffingRequestDTO {
   title?: string | null;
   notes?: string | null;
+  participantRequirements?: string | null;
   startsAt?: string | null;
   clearStartsAt?: boolean;
   endsAt?: string | null;
@@ -405,6 +456,7 @@ export interface PaidReservationDTO {
   ticketUrl: string;
   checkoutSessionId: string;
   checkoutUrl: string;
+  checkoutStatus: 'ready' | 'paid' | 'pending_reconciliation' | 'expired' | 'reconciliation_required';
 }
 
 export interface TicketReservationDTO extends TicketDTO {

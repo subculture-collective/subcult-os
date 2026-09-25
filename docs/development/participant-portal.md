@@ -30,7 +30,8 @@ followed by Refresh shows an unauthorized error without those records.
 ## Returned fields
 
 For each person-backed staffing assignment, the API returns only event ID and
-title, staffing item ID, title, kind, start/end times, and status. For a
+title, staffing item ID, title, kind, start/end times, status, and participant
+requirements. For a
 commitment, it returns only ID, event ID/title, title, due time, and status.
 Commitments appear only when their owner is the current person and their event
 also has a current person-backed assignment.
@@ -40,12 +41,17 @@ statuses, contacts, commitment descriptions, ticket data, finance/settlement
 data, payment-provider references, payout data, membership roles, or audit
 metadata. The workspace header links authenticated users to `/participant`.
 
-## Remaining work
+## Participant requirements
 
-The current model has no participant-visible requirements field. Existing
-staffing `notes` remain operator-private and are not repurposed. Adding a
-requirements field needs an explicit shared data model, write authority, and
-privacy tests.
+Staffing items have a separate `participant_requirements` field. It defaults to
+an empty string, is capped at 2,000 characters, and is written only by an
+event owner through the existing staffing create and update routes. Operator
+`notes` remain private and are never reused as participant requirements.
+
+The participant portal returns requirements only for an active,
+person-backed assignment belonging to the authenticated account. Application
+assignments, assignments for another person, revoked memberships, contacts,
+ticket and settlement data remain excluded.
 
 There is no verified account-claim flow for existing applications. Any future
 binding must require a deliberate, verified claim and preserve that an

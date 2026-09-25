@@ -16,8 +16,8 @@ func TestParticipantPortalShowsOnlyCurrentPersonAssignmentsAndCommitments(t *tes
 
 	var staffingID string
 	if err := fx.app.db.QueryRow(t.Context(), `
-		insert into event_staffing_items (event_id, title, kind, notes, starts_at, ends_at, assigned_person_id, status, created_by_person_id)
-		values ($1, 'Soundcheck', 'shift', 'operator-only staffing note', '2026-07-01T18:00:00Z', '2026-07-01T19:00:00Z', $2, 'assigned', $3)
+		insert into event_staffing_items (event_id, title, kind, notes, participant_requirements, starts_at, ends_at, assigned_person_id, status, created_by_person_id)
+		values ($1, 'Soundcheck', 'shift', 'operator-only staffing note', 'Bring a DI and arrive 15 minutes early.', '2026-07-01T18:00:00Z', '2026-07-01T19:00:00Z', $2, 'assigned', $3)
 		returning id
 	`, eventID, memberPersonID, ownerID).Scan(&staffingID); err != nil {
 		t.Fatal(err)
@@ -37,8 +37,8 @@ func TestParticipantPortalShowsOnlyCurrentPersonAssignmentsAndCommitments(t *tes
 		t.Fatal(err)
 	}
 	if _, err := fx.app.db.Exec(t.Context(), `
-		insert into event_staffing_items (event_id, title, kind, notes, assigned_application_id, status, created_by_person_id)
-		values ($1, 'Application-only assignment', 'task', 'application-only private note', $2, 'assigned', $3)
+		insert into event_staffing_items (event_id, title, kind, notes, participant_requirements, assigned_application_id, status, created_by_person_id)
+		values ($1, 'Application-only assignment', 'task', 'application-only private note', 'application-only requirement', $2, 'assigned', $3)
 	`, eventID, applicationID, ownerID); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestParticipantPortalShowsOnlyCurrentPersonAssignmentsAndCommitments(t *tes
 	insertTicketWithPaymentStatus(t, fx, eventID, "ticket-private@example.test", "Ticket Private", "paid", 1500, "usd")
 
 	portal := getParticipantPortal(t, fx.app, fx.memberCookie, http.StatusOK)
-	if got := portal.Assignments; len(got) != 1 || got[0].Title != "Soundcheck" || got[0].Kind != "shift" || got[0].StartsAt == nil || got[0].EndsAt == nil || got[0].Status != "assigned" {
+	if got := portal.Assignments; len(got) != 1 || got[0].Title != "Soundcheck" || got[0].Kind != "shift" || got[0].StartsAt == nil || got[0].EndsAt == nil || got[0].Status != "assigned" || got[0].ParticipantRequirements != "Bring a DI and arrive 15 minutes early." {
 		t.Fatalf("assignments = %#v", got)
 	}
 	if got := portal.Commitments; len(got) != 1 || got[0].Title != "Bring cables" || got[0].DueAt == nil || got[0].Status != "open" {
@@ -73,9 +73,10 @@ func TestParticipantPortalShowsOnlyCurrentPersonAssignmentsAndCommitments(t *tes
 		t.Fatal(err)
 	}
 	for _, privateValue := range []string{
-		"operator-only staffing note", "application-only private note", "application-private-message",
+		"operator-only staffing note", "application-only private note", "application-only requirement", "application-private-message",
 		"contact-private@example.test", "contact-private-note", "commitment-private-description",
 		"Owner-only commitment", "ticket-private@example.test", "Ticket Private",
+		"amountCents", "paymentStatus", "currency",
 	} {
 		if strings.Contains(string(body), privateValue) {
 			t.Fatalf("portal exposed private value %q: %s", privateValue, body)

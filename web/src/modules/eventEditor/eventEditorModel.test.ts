@@ -56,6 +56,7 @@ function staffingItem(overrides: Partial<EventStaffingItemDTO>): EventStaffingIt
 		title: 'Task',
 		kind: 'task',
 		notes: '',
+		participantRequirements: '',
 		startsAt: null,
 		endsAt: null,
 		assignedPersonId: null,

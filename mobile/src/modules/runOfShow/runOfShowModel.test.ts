@@ -21,8 +21,8 @@ describe('runOfShowModel', () => {
 
 	it('sorts staffing items by status then time then id', () => {
 		const items = sortRunOfShowItems([
-			{ id: 'b', eventId: 'event-1', title: 'B', kind: 'task', notes: '', startsAt: '2026-06-18T10:00:00.000Z', endsAt: null, assignedPersonId: null, assignedApplicationId: null, assigneeName: null, status: 'assigned', createdAt: '2026-06-18T09:00:00.000Z', updatedAt: '2026-06-18T09:00:00.000Z', completedAt: null, completedByPersonId: null },
-			{ id: 'a', eventId: 'event-1', title: 'A', kind: 'task', notes: '', startsAt: null, endsAt: null, assignedPersonId: null, assignedApplicationId: null, assigneeName: null, status: 'open', createdAt: '2026-06-18T09:00:00.000Z', updatedAt: '2026-06-18T09:00:00.000Z', completedAt: null, completedByPersonId: null },
+			{ id: 'b', eventId: 'event-1', title: 'B', kind: 'task', notes: '', participantRequirements: '', startsAt: '2026-06-18T10:00:00.000Z', endsAt: null, assignedPersonId: null, assignedApplicationId: null, assigneeName: null, status: 'assigned', createdAt: '2026-06-18T09:00:00.000Z', updatedAt: '2026-06-18T09:00:00.000Z', completedAt: null, completedByPersonId: null },
+			{ id: 'a', eventId: 'event-1', title: 'A', kind: 'task', notes: '', participantRequirements: '', startsAt: null, endsAt: null, assignedPersonId: null, assignedApplicationId: null, assigneeName: null, status: 'open', createdAt: '2026-06-18T09:00:00.000Z', updatedAt: '2026-06-18T09:00:00.000Z', completedAt: null, completedByPersonId: null },
 		]);
 
 		expect(items.map((item) => item.id)).toEqual(['a', 'b']);
@@ -30,8 +30,8 @@ describe('runOfShowModel', () => {
 
 	it('applies status updates and re-sorts staffing items', () => {
 		const items: EventStaffingItemDTO[] = [
-			{ id: 'late', eventId: 'event-1', title: 'Late', kind: 'task', notes: '', startsAt: '2026-06-18T12:00:00.000Z', endsAt: null, assignedPersonId: null, assignedApplicationId: null, assigneeName: null, status: 'open', createdAt: '2026-06-18T09:00:00.000Z', updatedAt: '2026-06-18T09:00:00.000Z', completedAt: null, completedByPersonId: null },
-			{ id: 'early', eventId: 'event-1', title: 'Early', kind: 'task', notes: '', startsAt: '2026-06-18T10:00:00.000Z', endsAt: null, assignedPersonId: null, assignedApplicationId: null, assigneeName: null, status: 'assigned', createdAt: '2026-06-18T09:00:00.000Z', updatedAt: '2026-06-18T09:00:00.000Z', completedAt: null, completedByPersonId: null },
+			{ id: 'late', eventId: 'event-1', title: 'Late', kind: 'task', notes: '', participantRequirements: '', startsAt: '2026-06-18T12:00:00.000Z', endsAt: null, assignedPersonId: null, assignedApplicationId: null, assigneeName: null, status: 'open', createdAt: '2026-06-18T09:00:00.000Z', updatedAt: '2026-06-18T09:00:00.000Z', completedAt: null, completedByPersonId: null },
+			{ id: 'early', eventId: 'event-1', title: 'Early', kind: 'task', notes: '', participantRequirements: '', startsAt: '2026-06-18T10:00:00.000Z', endsAt: null, assignedPersonId: null, assignedApplicationId: null, assigneeName: null, status: 'assigned', createdAt: '2026-06-18T09:00:00.000Z', updatedAt: '2026-06-18T09:00:00.000Z', completedAt: null, completedByPersonId: null },
 		];
 		const updated = applyRunOfShowStatusUpdate(items, { ...items[0], status: 'completed', updatedAt: '2026-06-18T10:00:00.000Z' });
 
@@ -40,16 +40,18 @@ describe('runOfShowModel', () => {
 	});
 
 	it('builds create and update payloads', () => {
-		expect(buildCreateRunOfShowPayload({ title: ' Setup ', kind: 'task', notes: ' Notes ', startsAt: '', endsAt: '' }, null, null)).toEqual({
+		expect(buildCreateRunOfShowPayload({ title: ' Setup ', kind: 'task', notes: ' Notes ', participantRequirements: ' Bring ID ', startsAt: '', endsAt: '' }, null, null)).toEqual({
 			title: 'Setup',
 			kind: 'task',
 			notes: 'Notes',
+			participantRequirements: 'Bring ID',
 			startsAt: null,
 			endsAt: null,
 		});
-		expect(buildUpdateRunOfShowPayload({ title: ' Wrap ', notes: ' Done ' }, '2026-06-18T10:00:00.000Z', null)).toEqual({
+		expect(buildUpdateRunOfShowPayload({ title: ' Wrap ', notes: ' Done ', participantRequirements: ' Earplugs ' }, '2026-06-18T10:00:00.000Z', null)).toEqual({
 			title: 'Wrap',
 			notes: 'Done',
+			participantRequirements: 'Earplugs',
 			startsAt: '2026-06-18T10:00:00.000Z',
 			clearEndsAt: true,
 		});

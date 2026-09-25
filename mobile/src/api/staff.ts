@@ -59,6 +59,7 @@ export interface CreateEventStaffingPayload {
   title: string;
   kind: EventStaffingItemDTO['kind'];
   notes: string;
+  participantRequirements?: string;
   startsAt?: string | null;
   endsAt?: string | null;
 }
@@ -70,6 +71,7 @@ export function createEventStaffing(eventID: string, body: CreateEventStaffingPa
 export interface UpdateEventStaffingPayload {
   title?: string;
   notes?: string;
+  participantRequirements?: string;
   startsAt?: string | null;
   clearStartsAt?: boolean;
   endsAt?: string | null;
