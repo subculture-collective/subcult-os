@@ -29,7 +29,7 @@ Production must set:
 - `APP_ENV=production`
 - `DATABASE_URL` with the production Postgres connection string
 - `SESSION_SECRET` as a non-default random value with at least 24 characters
-- `PUBLIC_WEB_URL` as the HTTPS browser origin
+- `PUBLIC_WEB_URL` as the HTTPS browser origin. It is also a web image build argument for the link preview address, so rebuild the web image when it changes
 - `API_ADDR` for the bind address, usually `:8080` inside a container
 - `IDENTITY_PROTECTION_KEY` as base64 for exactly 32 random bytes. See
   [key rotation](key-rotation.md) for ownership, backup expectations, and the

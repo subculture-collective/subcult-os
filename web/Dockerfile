@@ -3,6 +3,8 @@ WORKDIR /src
 COPY package.json pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile
 COPY . ./
+ARG PUBLIC_WEB_URL
+ENV PUBLIC_WEB_URL=$PUBLIC_WEB_URL
 RUN pnpm run build
 
 FROM nginx:1.29-alpine

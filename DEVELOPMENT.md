@@ -209,7 +209,7 @@ Event image uploads are backend-proxied to S3-compatible storage such as MinIO. 
 - Set a real `DATABASE_URL`; production startup fails without it.
 - Set a non-default `SESSION_SECRET` with at least 24 characters.
 - Set `IDENTITY_PROTECTION_KEY` to a base64-encoded 32-byte key held in the deployment secret store. Distinct derived domains protect email identity and AT OAuth material. Losing it makes protected material unreadable; rotating it requires a designed data migration.
-- Set `PUBLIC_WEB_URL` to the HTTPS web origin used by browsers.
+- Set `PUBLIC_WEB_URL` to the HTTPS web origin used by browsers. The web image build reads the same value (Compose passes it as a build argument) and writes it into the `og:image` address; an unset value builds `https://os.subcult.tv`. Rebuild the web image after changing the origin.
 - Keep `ATPROTO_OAUTH_ENABLED=false` until bounded live authorization/callback, refresh and provider-revocation journeys are qualified. When enabling it, configure the exact HTTPS client-metadata, callback and JWKS URLs plus a secret-store-backed multibase P-256 client key; see the AT Protocol kernel document.
 - Generate a compatible client key with `make generate-atproto-key` and send stdout directly into the deployment secret manager. Terminal history, logs, screenshots and committed env files are not secret managers.
 - Stripe paid ticketing is optional until an Event uses paid pricing; when enabled, set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`.
