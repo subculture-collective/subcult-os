@@ -69,8 +69,9 @@ invitation, identity, consent and operator home headers use the lockup. Public
 event, ticket and door screens keep event identity first and carry no lockup.
 
 The link preview image is the same for every URL because the web client renders
-routes in the browser. Its `og:image` address names the production origin,
-`https://os.subcult.tv`. The mobile app still ships the Expo placeholder icons;
+routes in the browser. Crawlers need an absolute address, so the web build
+writes `PUBLIC_WEB_URL` into `og:image` and falls back to
+`https://os.subcult.tv` when it is unset. The mobile app still ships the Expo placeholder icons;
 the pack has no approved app-icon export yet.
 
 ## Components and adoption
