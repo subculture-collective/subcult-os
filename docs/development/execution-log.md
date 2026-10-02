@@ -2087,3 +2087,21 @@ No overflow on any captured route at 390 px.
 ## Production origin moved to os.subcult.tv — 2026-10-02
 
 The owner moved the canonical origin from `subcults.subcult.tv` to `os.subcult.tv`. DNS and the Cloudflare tunnel already covered `*.subcult.tv`, and no PDS handle used `os`. Almaz Caddy serves the new host. The old host keeps `/api`, health and the legacy service-worker retirement, and 301-redirects every other path with its query, so already-sent email links keep working. The analytics proxy maps both hosts to the same site. Production `PUBLIC_WEB_URL` and the disabled AT OAuth URLs point to the new host. The API and email worker were recreated with unchanged images. Sessions are host-only, so operators sign in again on the new host. Verified: new-host pages return 200 and `/api/ready` reports ready. The API allows the new origin. Old-host page links redirect with path and query preserved. Backups and rollback are on Almaz under `/opt/server/management/backups/os-subcult-tv-*`.
+
+## Issue closure documentation — 2026-10-02
+
+Documentation only; no code, schema or contract changed.
+- [ADR 0008](../adr/0008-excluded-social-ranking-reputation.md) records the
+  excluded alliance, social-post, feed, ranking, streaming and reputation
+  concepts for SOCIAL-01 (#72). The ADR index now also lists ADR 0007.
+- The [backlog](backlog.md#parked-options) gains a "Parked options" section
+  for #48, #59, #60, #62–#66 and #69–#71. Each entry names its reopening
+  evidence and source material. A "Portfolio items outside Subcult OS"
+  section points #73–#82 to their Funding Kit proposals.
+- [Project maintenance](../project-maintenance.md) documents the current
+  pnpm build-script state, the owner-only trusted-package rule and Indigo and
+  TypeScript bump procedures for MAINT-01 (#84).
+- [Event exports](event-exports.md) records that no accounting format is
+  currently required for EXPORT-01 (#54). It also records a local Print/Save
+  as PDF check: a synthetic event's settlement print HTML, opened in headless
+  Chromium, produced a 2-page A4 PDF with the expected headings.

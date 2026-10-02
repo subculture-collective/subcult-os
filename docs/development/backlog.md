@@ -274,3 +274,105 @@ qualification.
 **Out of scope:** No production offline guarantee or permanent ticket cache.
 
 **Rollback:** Offline capability remains disabled; server-authoritative door flow stays intact.
+
+## Parked options
+
+These options were closed as no-go for now on 2026-10-02. None has the demand,
+partner or prerequisite evidence its issue requires. Each entry names the
+evidence that would justify a new issue. Reopening one does not admit it to
+the delivery order; it still needs its own acceptance criteria and checks.
+
+### COMMONS-NS — Namespace migration and reader compatibility examples
+
+- Problem: show old/new reader behavior, rollback and deletion propagation when a published namespace or schema changes.
+- Reopen when: COMMONS-01 (#47) is complete and a real schema change has two independent readers to exercise.
+- Source: [upstream.md](upstream.md).
+- Parked 2026-10-02; Gitea issue #48 closed as no-go for now.
+
+### CAL-SYNC — Calendar subscription and recurrence adapters
+
+- Problem: one iCalendar adapter with stable occurrence IDs, recurrence exceptions, timezones and cancellation.
+- Reopen when: operators ask for a specific calendar integration after CAL-01 (#22) and the pilot (#36).
+- Source: [first-draft plan](../research/first-draft-plan.md); [calendar interoperability](../research/Subcult%20Research%20Dossier/04%20AT%20Protocol/Subcult%20Calendar%20Interoperability.md).
+- Parked 2026-10-02; Gitea issue #59 closed as no-go for now.
+
+### TOUR-01 — Tours, appearances and multi-host planning
+
+- Problem: Tour/Appearance aggregates and multi-host permissions across occurrences.
+- Reopen when: a pilot operator shows a recurring regional-tour need that MODEL-01 occurrences cannot handle.
+- Source: [extraction manifest](subcults-extraction-manifest.md); [platform proposal](../research/2026-09-19-subcult-platform-proposal.md).
+- Parked 2026-10-02; Gitea issue #60 closed as no-go for now.
+
+### DIRECTORY-01 — Permissioned contacts, skills and venue availability
+
+- Problem: private venue, vendor, artist, gear and skills directories with explicitly approved sharing.
+- Reopen when: pilot collectives ask for this discovery and the privacy review (#15) covers shared contact records. No public reliability scoring ([ADR 0008](../adr/0008-excluded-social-ranking-reputation.md)).
+- Source: [first-draft plan](../research/first-draft-plan.md).
+- Parked 2026-10-02; Gitea issue #62 closed as no-go for now.
+
+### GEAR-01 — Equipment lending and logistics commitments
+
+- Problem: shared gear requests, custody, condition and return tracking.
+- Reopen when: DIRECTORY-01 exists and a pilot partner commits to using and maintaining the workflow.
+- Source: [first-draft plan](../research/first-draft-plan.md).
+- Parked 2026-10-02; Gitea issue #63 closed as no-go for now.
+
+### COOP-01 — Multi-collective and cooperative revenue coordination
+
+- Problem: shared events across organizations, with separate attribution, money and contact access.
+- Reopen when: a real cross-organization workflow is documented and its settlement, legal and accounting requirements are known. No pooled funds in the initial release.
+- Source: [first-draft plan](../research/first-draft-plan.md).
+- Parked 2026-10-02; Gitea issue #64 closed as no-go for now.
+
+### ARTS-REPORT — Arts-organization grant reporting exports
+
+- Problem: reproducible event and financial summaries for a funder report without attendee surveillance.
+- Reopen when: an operator brings a specific funder's reporting requirements, after EXPORT-01 (#54) and METRICS-01 (#37).
+- Source: [first-draft plan](../research/first-draft-plan.md).
+- Parked 2026-10-02; Gitea issue #65 closed as no-go for now.
+
+### CHANNELS-01 — SMS and additional announcement channels
+
+- Problem: channels beyond SIGNAL-01 email, each with sender verification and suppression.
+- Reopen when: pilot operators show demand for a specific channel and its provider unit cost is known. No autonomous marketing or social DM blasts.
+- Source: [privacy and consent](../research/Subcult%20Research%20Dossier/03%20Product/Subcult%20Privacy%20and%20Consent.md); [announcements](announcements.md).
+- Parked 2026-10-02; Gitea issue #66 closed as no-go for now.
+
+### PDS-01 — Bounded PDS invitations and hosted accounts
+
+- Problem: invitation-based hosted PDS accounts with expiry, migration, key custody and incident duties.
+- Reopen when: users need hosted accounts and someone accepts abuse, recovery and maintenance ownership, after AT-LIVE (#10). A new operational ADR and threat model are also required ([extraction manifest](subcults-extraction-manifest.md)).
+- Source: [PDS invite research](../research/Subcult%20Research%20Dossier/04%20AT%20Protocol/Subcult%20PDS%20Invite%20Research.md).
+- Parked 2026-10-02; Gitea issue #69 closed as no-go for now.
+
+### AUDIO-01 — Optional live audio and streaming
+
+- Problem: live audio as an optional integration, outside the core event workflow.
+- Reopen when: recurring paid demand is shown and moderation, recording-rights, accessibility and provider costs are estimated. LiveKit/streaming stays out of the core dependency chain ([ADR 0008](../adr/0008-excluded-social-ranking-reputation.md)).
+- Source: [development brief](development-brief.md).
+- Parked 2026-10-02; Gitea issue #70 closed as no-go for now.
+
+### COMMERCE-EXTRA — Memberships, marketplace and advanced commerce
+
+- Problem: paid memberships, resale, dynamic pricing, vendor/festival commerce and invoicing, each a separate hypothesis.
+- Reopen when: one of these has demonstrated demand after COMMERCE-01 (#53) and the pilot, with provider and regulatory burden compared. No all-in-one marketplace.
+- Source: [MVP scope](../research/Subcult%20Research%20Dossier/03%20Product/Subcult%20MVP%20Scope.md).
+- Parked 2026-10-02; Gitea issue #71 closed as no-go for now.
+
+## Portfolio items outside Subcult OS
+
+These proposals belong to the wider Subcult.tv portfolio, not to this
+repository. Their substance lives in the Funding Kit under
+`docs/research/Subcult Funding Kit/`. They are tracked outside this
+repository's delivery tracker; Gitea issues #73–#82 are not Subcult OS work.
+
+- #73 PATCHWORK-01, Patchwork public-resource pilot: [Patchwork Proposal](../research/Subcult%20Funding%20Kit/03%20Proposals/Patchwork%20Proposal.md).
+- #74 ORG-COMMONS, organization authority and publication boundaries: [Organization Commons Proposal](../research/Subcult%20Funding%20Kit/03%20Proposals/Organization%20Commons%20Proposal.md).
+- #75 RESOURCE-COMMONS, public-resource provenance and correction fixtures: [Protocol Commons Roadmap](../research/Subcult%20Funding%20Kit/01%20House/Protocol%20Commons%20Roadmap.md).
+- #76 COMMUNITY-OPS, community operations as a Commons consumer: [Community Operations Proposal](../research/Subcult%20Funding%20Kit/03%20Proposals/Community%20Operations%20Proposal.md).
+- #77 MEMBER-COMMS, membership communications: [Membership Communications Proposal](../research/Subcult%20Funding%20Kit/03%20Proposals/Membership%20Communications%20Proposal.md).
+- #78 MEETING-LAB, public meeting artifacts with private deliberation: [Open Meeting Lab Proposal](../research/Subcult%20Funding%20Kit/03%20Proposals/Open%20Meeting%20Lab%20Proposal.md).
+- #79 FORUM-01, community forum feasibility: [Community Forum Proposal](../research/Subcult%20Funding%20Kit/03%20Proposals/Community%20Forum%20Proposal.md).
+- #80 CIVIC-LAB, source receipts and civic evidence tooling: [Civic Evidence Lab Proposal](../research/Subcult%20Funding%20Kit/03%20Proposals/Civic%20Evidence%20Lab%20Proposal.md).
+- #81 SCAFFOLD-01, scaffold reserves and DSA-suite options: [Scaffold Reserve Proposal](../research/Subcult%20Funding%20Kit/03%20Proposals/Scaffold%20Reserve%20Proposal.md) and [DSA Suite Proposal](../research/Subcult%20Funding%20Kit/03%20Proposals/DSA%20Suite%20Proposal.md).
+- #82 MEDIA-01, adjacent media and evidence projects: [Portfolio and Boundaries](../research/Subcult%20Funding%20Kit/01%20House/Portfolio%20and%20Boundaries.md).

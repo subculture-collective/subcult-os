@@ -71,7 +71,23 @@ same repeatable-read export as the settlement. It does not create a server-side
 PDF or public artifact. Recorded obligations remain separate from ticket
 settlement net totals.
 
+## Accounting format and PDF check
+
+No external accounting format is required as of 2026-10-02, so EXPORT-01's
+conditional "selected accounting export when required" criterion is not
+triggered. Add an adapter only for a named accounting requirement.
+
+Print / Save as PDF was checked on 2026-10-02 against a local T3 preview. A
+fresh synthetic free event was created, published, given one budget line and
+closed with end-of-night. Its `settlement-print.html` returned 200 with
+`attachment; filename="event-settlement-print.html"`. The saved file was
+opened from disk in headless Chromium (Playwright `page.pdf()`, A4, print
+media). This produced a 2-page, 26,342-byte PDF. `pdftotext` showed the
+"Settlement report", "Report identity", "Stored settlement", "Corrections",
+"Budgets", "Recorded obligations" and "Manual recorded payments" headings.
+The budget line and its USD 123.45 total were present. This is a local
+synthetic check, not production or accounting-user qualification.
+
 ## Remaining EXPORT-01 work
 
-A selected accounting format, accounting-user validation and production
-qualification remain future work.
+Accounting-user validation and production qualification remain future work.

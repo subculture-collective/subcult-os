@@ -32,3 +32,5 @@ What trade-offs follow from this choice?
 - [ADR 0004](0004-event-discovery-ahead-of-first-cut.md): isolate alpha discovery
 - [ADR 0005](0005-subcult-os-platform-core.md): make Subcult OS the Subcult.tv platform core and extract from Subcults selectively
 - [ADR 0006](0006-no-prototype-compatibility-contract.md): allow deliberate prototype-breaking redesign unless real data or external state requires migration
+- [ADR 0007](0007-minimal-lexicon-admission.md): admit a minimal `tv.subcult.*` Lexicon chain for event, profile and place
+- [ADR 0008](0008-excluded-social-ranking-reputation.md): keep social, ranking, alliance, streaming and reputation concepts out of Subcult OS
