@@ -2,7 +2,7 @@
   "$schema": "https://t3.codes/schema/t3.json",
   "defaultThreadEnvMode": "worktree",
   "scripts": [
-    { "name": "Setup Worktree", "command": "bash scripts/dev-env.sh setup", "runOnWorktreeCreate": true, "async": false },
+    { "name": "Setup Worktree", "command": "if [ -f scripts/dev-env.sh ]; then bash scripts/dev-env.sh setup; else \"$HOME/.local/bin/t3-dev\" --profile subcult-os setup; fi", "runOnWorktreeCreate": true, "async": false },
     { "name": "Start Dev", "command": "bash scripts/dev-env.sh start" },
     { "name": "Watch Backend", "command": "bash scripts/dev-env.sh watch" },
     { "name": "Preview URL", "command": "bash scripts/dev-env.sh url" },
