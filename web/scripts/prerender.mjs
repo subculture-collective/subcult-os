@@ -1,0 +1,15 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { URL } from 'node:url';
+import { render, publicOrigin } from '../dist-ssr/entry-prerender.js';
+const root = new URL('../dist/', import.meta.url);
+const template = await readFile(new URL('index.html', root), 'utf8');
+const body = render();
+if (!body.includes('<h1') || !body.includes('<main')) throw new Error('Public discovery did not render');
+await writeFile(new URL('app.html', root), template);
+await writeFile(new URL('private.html', root), template.replace('</head>', '<meta name="robots" content="noindex,nofollow"></head>'));
+const url = `${publicOrigin}/discover`;
+const html = template.replace('<title>Subcult OS</title>', '<title>Discover published events | Subcult OS</title>').replace('</head>', `<link rel="canonical" href="${url}"><meta property="og:url" content="${url}"></head>`).replace('<div id="root"></div>', `<div id="root">${body}</div>`);
+await mkdir(new URL('discover/', root), { recursive: true });
+await writeFile(new URL('discover/index.html', root), html);
+await writeFile(new URL('robots.txt', root), `User-agent: *\nAllow: /discover\nAllow: /e/\nAllow: /public/events/\n\nSitemap: ${publicOrigin}/sitemap.xml\n`);
+await writeFile(new URL('sitemap.xml', root), `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${url}</loc></url></urlset>`);

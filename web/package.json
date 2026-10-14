@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "tsc -p tsconfig.json && vite build && vite build --ssr src/entry-prerender.tsx --outDir dist-ssr && node scripts/prerender.mjs",
     "lint": "eslint .",
     "test": "vitest run",
     "format": "tsc -p tsconfig.json --noEmit",

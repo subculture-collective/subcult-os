@@ -1,3 +1,4 @@
+import { eventMetadata, unavailableEventMetadata } from '../seo';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError, api, postJSON } from '../api';
@@ -120,10 +121,12 @@ function PublicEventPage({ slug }: { slug: string }) {
         if (loaded.publicSlug !== slug) throw new Error('Event details do not match this page. Return to Discover and try again.');
         if (!cancelled) {
           setEvent(loaded);
+          eventMetadata(loaded);
         }
       } catch (caught) {
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : 'Unable to load public event');
+          if (caught instanceof ApiError && caught.status === 404) unavailableEventMetadata();
         }
       } finally {
         if (!cancelled) {
