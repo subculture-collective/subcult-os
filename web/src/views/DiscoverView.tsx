@@ -436,6 +436,9 @@ export function DiscoverView() {
 				) : null}
 
 				<DiscoveryOccurrencesSection />
+                {!loading && !error && <footer className="mt-10 border-t border-stroke-subtle pt-5 text-sm text-fg-secondary">
+                    Subcult OS is developed by SUBCULT. <a className="underline underline-offset-4" href="https://subcult.tv/support">Support the studio</a>. Contributions are separate from event tickets and donations and do not buy a reservation or product access.
+                </footer>}
 			</section>
 		</main>
 	);
