@@ -75,3 +75,19 @@ no existing row or email behavior changes. The previous binary rejects version
 `backline-workers` profile and unset `BACKLINE_HANDOFF_URL`/`BACKLINE_HANDOFF_SECRET`
 so no handoff is sent or acknowledged while the restored binary ignores the
 tables. Retain the binding and handoff rows for audit.
+
+Version 33 adds the listmonk announcement relay (see
+`docs/development/listmonk-relay.md`): listmonk columns and a `listmonk`
+channel on `announcement_channel_bindings` (whose Discord id columns become
+nullable, with a per-channel shape check), the `kork_receipt` consent source
+with `listmonk_binding_id` and `origin_receipt` on `consent_grants`,
+`announcements.delivery_path` (backfilled to `native` for dispatched rows) with
+a path foreign key from `announcement_deliveries`, and
+`announcement_listmonk_deliveries`. Existing rows keep their behavior. The
+previous binary rejects version 33, so keep a pre-migration backup. Before an
+application rollback, stop the `listmonk-workers` profile and unset
+`LISTMONK_URL`/`LISTMONK_API_USER`/`LISTMONK_API_TOKEN`. The restored
+binary's native consent check does not know `listmonk_binding_id`, so it would
+treat Kork-origin grants as native email consent: withdraw the `kork_receipt`
+grants (operator withdrawal) or keep the `announcement-workers` profile stopped
+before it runs. Retain the binding and delivery rows for audit.

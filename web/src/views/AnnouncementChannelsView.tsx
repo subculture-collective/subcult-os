@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { ApiError, api, postJSON } from '../api';
 import { BacklineHandoffPanel } from '../components/BacklineHandoffPanel';
-import type { AnnouncementDTO, BacklinePreviewDTO, ChannelBindingDTO, ChannelHandoffDTO } from '../domain';
+import { ListmonkRelayPanel } from '../components/ListmonkRelayPanel';
+import type { AnnouncementDTO, AnnouncementPreviewDTO, BacklinePreviewDTO, ChannelBindingDTO, ChannelHandoffDTO, ListmonkBindingDTO, ListmonkBindingInput } from '../domain';
 import { latestRequest } from '../modules/announcements/backlineHandoff';
 import { Button } from '../ui/Button';
 import { Notice } from '../ui/Notice';
@@ -21,6 +22,9 @@ export function AnnouncementChannelsView({ workspaceId }: { workspaceId: string 
   const [selectedId, setSelectedId] = useState('');
   const [preview, setPreview] = useState<BacklinePreviewDTO | null>(null);
   const [handoffs, setHandoffs] = useState<ChannelHandoffDTO[]>([]);
+  const [listmonkBindings, setListmonkBindings] = useState<ListmonkBindingDTO[]>([]);
+  const [audience, setAudience] = useState<AnnouncementPreviewDTO | null>(null);
+  const [selected, setSelected] = useState<AnnouncementDTO | null>(null);
   const [label, setLabel] = useState('');
   const [serverId, setServerId] = useState('');
   const [channelId, setChannelId] = useState('');
@@ -28,11 +32,12 @@ export function AnnouncementChannelsView({ workspaceId }: { workspaceId: string 
   const [notice, setNotice] = useState<string | null>(null);
   const base = `/api/workspaces/${workspaceId}`;
   const active = bindings.find((binding) => binding.active) ?? null;
+  const activeListmonk = listmonkBindings.find((binding) => binding.active) ?? null;
 
   function fail(error: unknown) {
     if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
       generation.current += 1;
-      setAnnouncements([]); setBindings([]); setPreview(null); setHandoffs([]);
+      setAnnouncements([]); setBindings([]); setPreview(null); setHandoffs([]); setListmonkBindings([]); setAudience(null); setSelected(null);
     }
     setNotice(message(error));
   }
@@ -40,12 +45,13 @@ export function AnnouncementChannelsView({ workspaceId }: { workspaceId: string 
   async function loadWorkspace() {
     const current = ++generation.current;
     try {
-      const [nextAnnouncements, nextBindings] = await Promise.all([
+      const [nextAnnouncements, nextBindings, nextListmonk] = await Promise.all([
         api<AnnouncementDTO[]>(`${base}/announcements`),
         api<ChannelBindingDTO[]>(`${base}/backline-bindings`),
+        api<ListmonkBindingDTO[]>(`${base}/listmonk-bindings`),
       ]);
       if (current !== generation.current) return;
-      setAnnouncements(nextAnnouncements); setBindings(nextBindings);
+      setAnnouncements(nextAnnouncements); setBindings(nextBindings); setListmonkBindings(nextListmonk);
     } catch (error) { if (current === generation.current) fail(error); }
   }
 
@@ -55,19 +61,20 @@ export function AnnouncementChannelsView({ workspaceId }: { workspaceId: string 
   async function loadSelected(id: string) {
     const current = generation.current;
     const token = selection.current.begin();
-    if (!id) { setPreview(null); setHandoffs([]); return; }
+    if (!id) { setPreview(null); setHandoffs([]); setAudience(null); setSelected(null); return; }
     try {
-      const [nextPreview, announcement] = await Promise.all([
+      const [nextPreview, announcement, nextAudience] = await Promise.all([
         api<BacklinePreviewDTO>(`${base}/announcements/${id}/backline-preview`),
         api<AnnouncementDTO>(`${base}/announcements/${id}`),
+        api<AnnouncementPreviewDTO>(`${base}/announcements/${id}/preview`),
       ]);
       if (current !== generation.current || !selection.current.isCurrent(token)) return;
-      setPreview(nextPreview); setHandoffs(announcement.channelHandoffs);
+      setPreview(nextPreview); setHandoffs(announcement.channelHandoffs); setAudience(nextAudience); setSelected(announcement);
     } catch (error) { if (current === generation.current && selection.current.isCurrent(token)) fail(error); }
   }
 
   useEffect(() => { setNotice(null); void loadWorkspace(); return () => { generation.current += 1; }; }, [workspaceId]);
-  useEffect(() => { selectedRef.current = selectedId; setPreview(null); setHandoffs([]); void loadSelected(selectedId); }, [selectedId]);
+  useEffect(() => { selectedRef.current = selectedId; setPreview(null); setHandoffs([]); setAudience(null); setSelected(null); void loadSelected(selectedId); }, [selectedId]);
 
   async function run(action: () => Promise<unknown>, done: string) {
     if (busy) return false;
@@ -88,6 +95,15 @@ export function AnnouncementChannelsView({ workspaceId }: { workspaceId: string 
       .then((saved) => { if (saved) { setLabel(''); setServerId(''); setChannelId(''); } });
   }
 
+  function connectListmonk(input: ListmonkBindingInput) {
+    void run(() => postJSON(`${base}/listmonk-bindings`, input), 'listmonk list connected. Dispatched announcements now go through it.');
+  }
+
+  function revokeListmonk(binding: ListmonkBindingDTO) {
+    if (typeof window !== 'undefined' && !window.confirm(`Disconnect ${binding.label}? Unsent listmonk messages are withheld and later announcements use Subcult OS email.`)) return;
+    void run(() => postJSON(`${base}/listmonk-bindings/${binding.id}/revoke`, {}), 'listmonk list disconnected. It stays listed for audit.');
+  }
+
   function revoke(binding: ChannelBindingDTO) {
     if (typeof window !== 'undefined' && !window.confirm(`Disconnect ${binding.label}? Queued handoffs are cancelled and delivered ones are withdrawn where Backline still can.`)) return;
     void run(() => postJSON(`${base}/backline-bindings/${binding.id}/revoke`, {}), 'Backline channel disconnected. It stays listed for audit.');
@@ -97,8 +113,8 @@ export function AnnouncementChannelsView({ workspaceId }: { workspaceId: string 
     <header className="rounded-panel border border-stroke-subtle bg-surface-panel p-6">
       <a className="text-sm text-fg-secondary underline underline-offset-4" href={`/workspace?workspaceId=${workspaceId}`}>Back to workspace</a>
       <p className="mt-5 text-xs uppercase tracking-[0.2em] text-fg-label">Announcements</p>
-      <h1 className="mt-2 text-3xl font-bold">Backline channel handoff</h1>
-      <p className="mt-2 max-w-2xl text-fg-secondary">Post an approved announcement to one connected Backline channel. Scheduling approves the content; the handoff only adds the channel.</p>
+      <h1 className="mt-2 text-3xl font-bold">Announcement channels</h1>
+      <p className="mt-2 max-w-2xl text-fg-secondary">Post an approved announcement to one connected Backline channel, or relay it to one listmonk list. Scheduling approves the content; channels only add where it goes.</p>
     </header>
     {notice && <Notice>{notice}</Notice>}
 
@@ -138,5 +154,9 @@ export function AnnouncementChannelsView({ workspaceId }: { workspaceId: string 
     {preview && <BacklineHandoffPanel preview={preview} handoffs={handoffs} busy={busy}
       onHandoff={() => preview.binding && void run(() => postJSON(`${base}/announcements/${preview.announcementId}/backline-handoff`, { bindingId: preview.binding?.id }), 'Handed off. The worker delivers it to Backline and records the outcome here.')}
       onRetry={(handoff) => void run(() => postJSON(`${base}/announcements/${preview.announcementId}/channel-handoffs/${handoff.id}/retry`, {}), 'Retry queued with the same occurrence key.')} />}
+
+    <ListmonkRelayPanel binding={activeListmonk} preview={audience} counts={selected?.listmonkStatusCounts ?? {}} deliveryPath={selected?.deliveryPath} busy={busy}
+      onConnect={connectListmonk} onRevoke={revokeListmonk}
+      onRetry={() => selected && void run(() => postJSON(`${base}/announcements/${selected.id}/listmonk-deliveries/retry`, {}), 'Held listmonk messages queued again.')} />
   </main>;
 }

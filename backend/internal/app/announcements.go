@@ -43,6 +43,10 @@ type announcementDTO struct {
 	DeliveryStatusCounts map[string]int `json:"deliveryStatusCounts"`
 	// ChannelHandoffs is the Backline half of the outcome ledger (#221).
 	ChannelHandoffs []channelHandoffDTO `json:"channelHandoffs"`
+	// DeliveryPath is set at dispatch; ListmonkStatusCounts is the listmonk
+	// half of the ledger (#220): counts only, never an address.
+	DeliveryPath         *string        `json:"deliveryPath,omitempty"`
+	ListmonkStatusCounts map[string]int `json:"listmonkStatusCounts"`
 }
 
 type announcementPreviewDTO struct {
@@ -50,28 +54,48 @@ type announcementPreviewDTO struct {
 	Body               string `json:"body"`
 	RecipientCount     int    `json:"recipientCount"`
 	EstimatedCostCents int    `json:"estimatedCostCents"`
+	// DeliveryPath is the path dispatch would choose now: "listmonk" while a
+	// listmonk binding is active (#220), otherwise "native". WithheldCount
+	// counts verified, unwithdrawn grants that path would not use
+	// (suppressed, or not accepted by the binding's consent policy).
+	DeliveryPath       string `json:"deliveryPath"`
+	WithheldCount      int    `json:"withheldCount"`
+	ListmonkConfigured bool   `json:"listmonkConfigured"`
 }
 
-// announcementAudienceCount counts the workspace's verified, unwithdrawn
-// announcement-purpose email grants whose address is not currently
-// suppressed. It is the same query dispatch uses to derive the actual
-// audience (see RunAnnouncementDispatch), so preview and dispatch never
-// disagree about who counts as an eligible recipient. It never returns
-// the addresses themselves.
-func (a *App) announcementAudienceCount(ctx context.Context, workspaceID string) (int, error) {
-	var count int
-	err := a.db.QueryRow(ctx, `
-		select count(*) from consent_grants g
-		where g.workspace_id = $1
-		  and g.channel = 'email'
-		  and g.purpose = $2
-		  and g.verified_at is not null
-		  and g.withdrawn_at is null
-		  and not exists (
-		    select 1 from email_suppressions s where s.recipient_email = g.recipient_address
-		  )
-	`, workspaceID, consentPurposeAnnouncement).Scan(&count)
-	return count, err
+// announcementAudience counts the workspace's verified, unwithdrawn
+// announcement-purpose email grants that the current delivery path would use
+// and those it would withhold. Natively that is grants without a listmonk
+// scope whose address is not suppressed; with an active listmonk binding it
+// is grants the binding's policy accepts (see listmonkGrantPolicy). Dispatch
+// applies the same rules per recipient. It never returns an address.
+func (a *App) announcementAudience(ctx context.Context, workspaceID string) (path string, eligible, withheld int, err error) {
+	path = deliveryPathNative
+	var bindingID string
+	err = a.db.QueryRow(ctx, `select id::text from announcement_channel_bindings where workspace_id = $1 and channel = $2 and revoked_at is null`,
+		workspaceID, channelListmonkName).Scan(&bindingID)
+	switch {
+	case err == nil:
+		path = deliveryPathListmonk
+	case !errors.Is(err, pgx.ErrNoRows):
+		return path, 0, 0, err
+	}
+	accepted, args := `g.listmonk_binding_id is null`, []any{workspaceID, consentPurposeAnnouncement}
+	if path == deliveryPathListmonk {
+		accepted = `exists (select 1 from announcement_channel_bindings b where b.id = $3 and ` + listmonkGrantPolicy + `)`
+		args = append(args, bindingID)
+	}
+	err = a.db.QueryRow(ctx, `
+		select count(*) filter (where ok), count(*) filter (where not ok)
+		from (
+			select (`+accepted+`) and not exists (
+			         select 1 from email_suppressions s where s.recipient_email = g.recipient_address) as ok
+			from consent_grants g
+			where g.workspace_id = $1 and g.channel = 'email' and g.purpose = $2
+			  and g.verified_at is not null and g.withdrawn_at is null
+		) audience
+	`, args...).Scan(&eligible, &withheld)
+	return path, eligible, withheld, err
 }
 
 type createAnnouncementRequest struct {
@@ -153,7 +177,7 @@ func (a *App) handlePreviewAnnouncement(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	count, err := a.announcementAudienceCount(r.Context(), workspaceID)
+	path, count, withheld, err := a.announcementAudience(r.Context(), workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not compute announcement audience")
 		return
@@ -164,6 +188,9 @@ func (a *App) handlePreviewAnnouncement(w http.ResponseWriter, r *http.Request) 
 		Body:               body,
 		RecipientCount:     count,
 		EstimatedCostCents: count * a.config.AnnouncementUnitCostCents,
+		DeliveryPath:       path,
+		WithheldCount:      withheld,
+		ListmonkConfigured: a.config.listmonkRelayConfigured(),
 	})
 }
 
@@ -404,11 +431,11 @@ func (a *App) loadAnnouncementDTO(ctx context.Context, workspaceID, announcement
 	var createdAt, updatedAt time.Time
 	err := a.db.QueryRow(ctx, `
 		select id::text, subject, body, status, scheduled_for, cancelled_at, dispatched_at,
-		       recipient_count, withheld_count, estimated_cost_cents, created_at, updated_at
+		       recipient_count, withheld_count, estimated_cost_cents, created_at, updated_at, delivery_path
 		from announcements where id = $1 and workspace_id = $2
 	`, announcementID, workspaceID).Scan(
 		&dto.ID, &dto.Subject, &dto.Body, &dto.Status, &scheduledFor, &cancelledAt, &dispatchedAt,
-		&dto.RecipientCount, &dto.WithheldCount, &dto.EstimatedCostCents, &createdAt, &updatedAt)
+		&dto.RecipientCount, &dto.WithheldCount, &dto.EstimatedCostCents, &createdAt, &updatedAt, &dto.DeliveryPath)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return announcementDTO{}, errAnnouncementNotFound
@@ -446,6 +473,9 @@ func (a *App) loadAnnouncementDTO(ctx context.Context, workspaceID, announcement
 	}
 	rows.Close()
 	if dto.ChannelHandoffs, err = a.loadAnnouncementHandoffs(ctx, announcementID); err != nil {
+		return announcementDTO{}, err
+	}
+	if dto.ListmonkStatusCounts, err = a.loadListmonkStatusCounts(ctx, announcementID); err != nil {
 		return announcementDTO{}, err
 	}
 	return dto, nil

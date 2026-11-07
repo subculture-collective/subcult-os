@@ -31,6 +31,8 @@ The optional `announcement-workers` profile runs `email-deliver -announce -watch
 
 The optional `backline-workers` profile runs `backline-handoff -watch`, which delivers approved announcement handoffs to one connected Backline channel (see `docs/development/backline-handoff.md`, #221). It requires `BACKLINE_HANDOFF_URL` and `BACKLINE_HANDOFF_SECRET`; both default to empty and the worker refuses to run without them. Test against the synthetic receiver only; never point automated qualification at a real Backline or Discord channel.
 
+The optional `listmonk-workers` profile runs `listmonk-relay -watch`, which sends announcement occurrences routed to a workspace's one bound listmonk list as per-recipient transactional messages (see `docs/development/listmonk-relay.md`, #220). It requires `LISTMONK_URL`, `LISTMONK_API_USER` and `LISTMONK_API_TOKEN` (all empty by default) and, for real sends, `MAIL_DELIVERY_ENABLED`. Never send a listmonk campaign to the list, never send one occurrence through both paths, and test against the synthetic `httptest` listmonk only.
+
 ## Verification
 
 For isolated T3 development, use `bash scripts/dev-env.sh start` and the printed

@@ -56,6 +56,9 @@ services:
       ANNOUNCEMENT_UNIT_COST_CENTS: ${ANNOUNCEMENT_UNIT_COST_CENTS:-0}
       BACKLINE_HANDOFF_URL: ${BACKLINE_HANDOFF_URL:-}
       BACKLINE_HANDOFF_SECRET: ${BACKLINE_HANDOFF_SECRET:-}
+      LISTMONK_URL: ${LISTMONK_URL:-}
+      LISTMONK_API_USER: ${LISTMONK_API_USER:-}
+      LISTMONK_API_TOKEN: ${LISTMONK_API_TOKEN:-}
       MOBILE_APPLE_APP_IDS: ${MOBILE_APPLE_APP_IDS:-}
       MOBILE_ANDROID_PACKAGE: ${MOBILE_ANDROID_PACKAGE:-}
       MOBILE_ANDROID_CERT_SHA256: ${MOBILE_ANDROID_CERT_SHA256:-}
@@ -100,6 +103,16 @@ services:
     profiles: [backline-workers]
     build: ./backend
     command: ["/app/backline-handoff", "-watch"]
+    environment: *api_environment
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+
+  listmonk-relay:
+    profiles: [listmonk-workers]
+    build: ./backend
+    command: ["/app/listmonk-relay", "-watch"]
     environment: *api_environment
     restart: unless-stopped
     depends_on:

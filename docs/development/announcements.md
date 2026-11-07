@@ -197,6 +197,16 @@ An approved (scheduled or dispatched) announcement can also be handed to one
 connected Backline channel. Its outcomes appear in `channelHandoffs` on the
 get/list responses. See [`backline-handoff.md`](backline-handoff.md).
 
+## listmonk relay
+
+While a workspace has an active listmonk binding, dispatch routes every
+recipient of an occurrence through that one listmonk list instead of the
+native outbox, never both. Consent is re-derived per recipient, only grants the
+binding's consent policy accepts count, and the relay checks consent and
+suppression again before each message. The preview reports the path and its
+eligible and withheld counts; `listmonkStatusCounts` on the get/list responses
+is the listmonk half of the ledger. See [`listmonk-relay.md`](listmonk-relay.md).
+
 ## Remaining limits
 
 - No SMS or other second consent channel; `consent_grants.channel` remains

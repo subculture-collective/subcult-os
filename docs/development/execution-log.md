@@ -2126,3 +2126,17 @@ The contract is in [backline-handoff.md](backline-handoff.md) and
 disposable PostgreSQL and an `httptest` receiver, plus web component tests. No
 real Backline receiver or Discord channel was contacted. Backline #88 owns the
 receiver.
+
+## listmonk announcement relay (#220) — 2026-11-07
+
+Migration 000033 lets a workspace bind one listmonk list, transactional
+template and sender, with a consent-receiver policy: native grants count only
+under the bound disclosure version, and Kork sign-up receipts count only when
+their list, sender, purpose and disclosure match the binding exactly. Dispatch
+records one delivery path per occurrence, enforced by foreign keys, and the
+opt-in `listmonk-relay` worker (`listmonk-workers` profile) upserts each
+subscriber without undoing an unsubscribe or blocklist, re-checks consent and
+suppression, and sends one `POST /api/tx` per recipient. Uncertain and failed
+results are held. Evidence is synthetic: Go tests against disposable PostgreSQL
+and an `httptest` listmonk, plus web component tests. No real listmonk was
+contacted. See [listmonk-relay.md](listmonk-relay.md).

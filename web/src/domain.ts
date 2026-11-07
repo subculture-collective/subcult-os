@@ -820,6 +820,45 @@ export interface AnnouncementDTO {
   updatedAt: string;
   deliveryStatusCounts: Record<string, number>;
   channelHandoffs: ChannelHandoffDTO[];
+  // Set at dispatch (#220); listmonkStatusCounts is the listmonk ledger.
+  deliveryPath?: AnnouncementDeliveryPath;
+  listmonkStatusCounts: Record<string, number>;
+}
+export type AnnouncementDeliveryPath = 'native' | 'listmonk';
+export interface AnnouncementPreviewDTO {
+  subject: string;
+  body: string;
+  recipientCount: number;
+  withheldCount: number;
+  estimatedCostCents: number;
+  deliveryPath: AnnouncementDeliveryPath;
+  listmonkConfigured: boolean;
+}
+export interface KorkReceiverPolicy {
+  listUrl: string;
+  sender: string;
+  purpose: string;
+  disclosure: string;
+}
+export interface ListmonkBindingDTO {
+  id: string;
+  label: string;
+  listId: number;
+  templateId: number;
+  senderAddress: string;
+  disclosureVersion: string;
+  korkPolicy: KorkReceiverPolicy | null;
+  active: boolean;
+  createdAt: string;
+  revokedAt?: string;
+}
+export interface ListmonkBindingInput {
+  label: string;
+  listId: number;
+  templateId: number;
+  senderAddress: string;
+  disclosureVersion: string;
+  korkPolicy?: KorkReceiverPolicy;
 }
 export type BacklineHandoffBlocker = 'announcement_not_approved' | 'no_active_binding' | 'content_too_long' | 'adapter_not_configured' | 'already_handed_off';
 export interface BacklinePreviewDTO {

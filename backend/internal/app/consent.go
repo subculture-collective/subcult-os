@@ -95,6 +95,7 @@ func checkSendPermission(ctx context.Context, db interface {
 			  and purpose = $4
 			  and verified_at is not null
 			  and withdrawn_at is null
+			  and listmonk_binding_id is null
 		)
 	`, workspaceID, channel, recipient, purpose).Scan(&granted); err != nil {
 		return err

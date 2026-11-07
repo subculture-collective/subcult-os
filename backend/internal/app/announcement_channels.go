@@ -149,7 +149,7 @@ func (a *App) handleListChannelBindings(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
-	rows, err := a.db.Query(r.Context(), `select `+bindingColumns+` from announcement_channel_bindings where workspace_id = $1 order by created_at desc`, workspaceID)
+	rows, err := a.db.Query(r.Context(), `select `+bindingColumns+` from announcement_channel_bindings where workspace_id = $1 and channel = $2 order by created_at desc`, workspaceID, channelBacklineName)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load bindings")
 		return
@@ -264,11 +264,11 @@ func (a *App) handleRevokeChannelBinding(w http.ResponseWriter, r *http.Request)
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	dto, err := scanChannelBinding(tx.QueryRow(r.Context(), `
 		update announcement_channel_bindings set revoked_at = now(), revoked_by_person_id = $3
-		where id = $1 and workspace_id = $2 and revoked_at is null
-		returning `+bindingColumns, bindingID, workspaceID, actorID))
+		where id = $1 and workspace_id = $2 and channel = $4 and revoked_at is null
+		returning `+bindingColumns, bindingID, workspaceID, actorID, channelBacklineName))
 	if errors.Is(err, pgx.ErrNoRows) {
 		var exists bool
-		_ = tx.QueryRow(r.Context(), `select exists(select 1 from announcement_channel_bindings where id = $1 and workspace_id = $2)`, bindingID, workspaceID).Scan(&exists)
+		_ = tx.QueryRow(r.Context(), `select exists(select 1 from announcement_channel_bindings where id = $1 and workspace_id = $2 and channel = $3)`, bindingID, workspaceID, channelBacklineName).Scan(&exists)
 		if exists {
 			writeError(w, http.StatusConflict, "binding is already revoked")
 			return
@@ -480,8 +480,8 @@ func (a *App) handleCreateBacklineHandoff(w http.ResponseWriter, r *http.Request
 	}
 	// Scoping the lookup to this workspace rejects another workspace's binding.
 	var revoked bool
-	err = tx.QueryRow(r.Context(), `select revoked_at is not null from announcement_channel_bindings where id = $1 and workspace_id = $2 for share`,
-		req.BindingID, workspaceID).Scan(&revoked)
+	err = tx.QueryRow(r.Context(), `select revoked_at is not null from announcement_channel_bindings where id = $1 and workspace_id = $2 and channel = $3 for share`,
+		req.BindingID, workspaceID, channelBacklineName).Scan(&revoked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "binding not found")
 		return

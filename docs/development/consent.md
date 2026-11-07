@@ -66,7 +66,7 @@ without a real grant.
 | `disclosure_version` | Opaque operator-supplied label identifying which disclosure text the recipient agreed to. Recorded so a future audit or re-consent campaign can tell which recipients agreed to an older disclosure. This slice does not interpret the value. |
 | `granted_at` | When the grant was created (not when it was verified). |
 | `withdrawn_at` / `withdrawal_reason` | Set once, never cleared. A withdrawn grant is permanently inactive; recording a new grant for the same tuple requires the old one to already be withdrawn (see the unique index below). |
-| `source` | `'explicit_form'` (recipient submitted a public form themselves) or `'operator_recorded'` (an operator recorded a grant obtained elsewhere, e.g. a paper sign-up sheet). Both still require the same verification step before the grant is active. |
+| `source` | `'explicit_form'` (recipient submitted a public form themselves) or `'operator_recorded'` (an operator recorded a grant obtained elsewhere, e.g. a paper sign-up sheet). Both still require the same verification step before the grant is active. `'kork_receipt'` (migration 000033) is a Kork double opt-in receipt that matched a listmonk binding's receiver policy; it is scoped to that binding through `listmonk_binding_id`, never authorizes native email and is described in [`listmonk-relay.md`](listmonk-relay.md). |
 | `created_by_person_id` | The operator who recorded the grant. |
 
 **Unique active grant**: a partial unique index on
@@ -203,7 +203,9 @@ This codebase does not render or validate disclosure text; it only records
 which label the recipient agreed to at grant time, so a future audit can
 identify recipients whose consent predates a disclosure-text change. There
 is no re-consent workflow in this slice: reconciling old-disclosure grants
-against a new disclosure version is left to a future feature.
+against a new disclosure version is left to a future feature. The one place
+the label is compared is a listmonk binding, which uses only grants confirmed
+under its own `disclosureVersion` (see [`listmonk-relay.md`](listmonk-relay.md)).
 
 ## Suppression precedence
 

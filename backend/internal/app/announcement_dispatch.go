@@ -90,6 +90,33 @@ func (a *App) dispatchOneAnnouncement(ctx context.Context) (dispatched bool, enq
 		return false, 0, 0, errors.New("announcement claim failed")
 	}
 
+	// Single-path routing (#220): an active listmonk binding at dispatch time
+	// routes every recipient of this occurrence through listmonk; otherwise
+	// the native outbox. The path is recorded once and the per-recipient rows
+	// of each path reference it, so one occurrence never uses both. The
+	// binding row is share-locked so a concurrent revoke waits for this
+	// dispatch or is seen by it.
+	binding, err := scanListmonkBinding(tx.QueryRow(ctx, `
+		select `+listmonkBindingColumns+` from announcement_channel_bindings
+		where workspace_id = $1 and channel = $2 and revoked_at is null for share
+	`, workspaceID, channelListmonkName))
+	path := deliveryPathListmonk
+	if errors.Is(err, pgx.ErrNoRows) {
+		path = deliveryPathNative
+	} else if err != nil {
+		return false, 0, 0, errors.New("announcement binding lookup failed")
+	}
+	if _, err := tx.Exec(ctx, `update announcements set delivery_path = $2 where id = $1`, announcementID, path); err != nil {
+		return false, 0, 0, errors.New("announcement routing failed")
+	}
+	if path == deliveryPathListmonk {
+		enqueued, withheld, err := a.dispatchListmonkRecipients(ctx, tx, binding, workspaceID, announcementID, subject, body)
+		if err != nil {
+			return false, 0, 0, err
+		}
+		return a.finishAnnouncementDispatch(ctx, tx, announcementID, enqueued, withheld)
+	}
+
 	// Re-derive the raw candidate audience fresh, inside this transaction
 	// — never from any count computed at preview/schedule time — as
 	// one verified grant per address for this workspace/purpose, preferring
@@ -107,6 +134,7 @@ func (a *App) dispatchOneAnnouncement(ctx context.Context) (dispatched bool, enq
 		  and g.channel = 'email'
 		  and g.purpose = $2
 		  and g.verified_at is not null
+		  and g.listmonk_binding_id is null
 		order by g.recipient_address, (g.withdrawn_at is null) desc, g.granted_at desc, g.id
 	`, workspaceID, consentPurposeAnnouncement)
 	if err != nil {
@@ -180,6 +208,12 @@ func (a *App) dispatchOneAnnouncement(ctx context.Context) (dispatched bool, enq
 		enqueued++
 	}
 
+	return a.finishAnnouncementDispatch(ctx, tx, announcementID, enqueued, withheld)
+}
+
+// finishAnnouncementDispatch records the occurrence's counts and commits the
+// dispatch transaction for either path.
+func (a *App) finishAnnouncementDispatch(ctx context.Context, tx pgx.Tx, announcementID string, enqueued, withheld int) (bool, int, int, error) {
 	estimatedCostCents := enqueued * a.config.AnnouncementUnitCostCents
 	if _, err := tx.Exec(ctx, `
 		update announcements

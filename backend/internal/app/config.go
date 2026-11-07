@@ -68,6 +68,12 @@ type Config struct {
 	// by default; nothing is sent or accepted unless both are set.
 	BacklineHandoffURL    string
 	BacklineHandoffSecret string
+	// ListmonkURL, ListmonkAPIUser and ListmonkAPIToken enable the opt-in
+	// listmonk announcement relay (docs/development/listmonk-relay.md). All
+	// empty by default; nothing is sent to listmonk unless all three are set.
+	ListmonkURL      string
+	ListmonkAPIUser  string
+	ListmonkAPIToken string
 	// Native app link verification. Each list is empty unless configured, and
 	// the matching /.well-known document is served only when it is set.
 	MobileAppleAppIDs             []string
@@ -86,6 +92,9 @@ func LoadConfig() Config {
 		AnnouncementUnitCostCents:     announcementUnitCostCents,
 		BacklineHandoffURL:            strings.TrimSpace(env("BACKLINE_HANDOFF_URL", "")),
 		BacklineHandoffSecret:         env("BACKLINE_HANDOFF_SECRET", ""),
+		ListmonkURL:                   strings.TrimRight(strings.TrimSpace(env("LISTMONK_URL", "")), "/"),
+		ListmonkAPIUser:               strings.TrimSpace(env("LISTMONK_API_USER", "")),
+		ListmonkAPIToken:              env("LISTMONK_API_TOKEN", ""),
 		announcementUnitCostCentsRaw:  announcementUnitCostCentsRaw,
 		ATProjectionEnabled:           parseEnvBool(atProjectionEnabledRaw),
 		atProjectionEnabledRaw:        atProjectionEnabledRaw,
@@ -213,6 +222,7 @@ func (c Config) Validate() error {
 		}
 	}
 	problems = append(problems, c.backlineHandoffProblems()...)
+	problems = append(problems, c.listmonkRelayProblems()...)
 	problems = append(problems, c.appLinkProblems()...)
 	if strings.TrimSpace(c.Addr) == "" {
 		problems = append(problems, "API_ADDR is required")
@@ -280,6 +290,32 @@ func (c Config) backlineHandoffProblems() []string {
 		if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" ||
 			(parsed.Scheme != "https" && (production || parsed.Scheme != "http")) {
 			problems = append(problems, "BACKLINE_HANDOFF_URL must be an absolute HTTPS URL (HTTP only outside production)")
+		}
+	}
+	return problems
+}
+
+func (c Config) listmonkRelayProblems() []string {
+	rawURL, user, token := strings.TrimSpace(c.ListmonkURL), c.ListmonkAPIUser, c.ListmonkAPIToken
+	if rawURL == "" && user == "" && token == "" {
+		return nil
+	}
+	var problems []string
+	if rawURL == "" || user == "" || token == "" {
+		problems = append(problems, "LISTMONK_URL, LISTMONK_API_USER and LISTMONK_API_TOKEN must be set together")
+	}
+	if user != "" && !listmonkAPIUserPattern.MatchString(user) {
+		problems = append(problems, "LISTMONK_API_USER may contain only letters, digits and . _ @ + -")
+	}
+	if token != "" && strings.IndexFunc(token, unicode.IsSpace) >= 0 {
+		problems = append(problems, "LISTMONK_API_TOKEN must not contain whitespace")
+	}
+	if rawURL != "" {
+		parsed, err := url.Parse(rawURL)
+		production := strings.EqualFold(strings.TrimSpace(c.AppEnv), "production")
+		if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" ||
+			(parsed.Scheme != "https" && (production || parsed.Scheme != "http")) {
+			problems = append(problems, "LISTMONK_URL must be an absolute HTTPS URL (HTTP only outside production)")
 		}
 	}
 	return problems
