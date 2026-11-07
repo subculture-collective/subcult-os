@@ -62,6 +62,7 @@ import {
 import { canDownloadSettlementExport, downloadSettlementExport, downloadSettlementReport } from '../modules/eventEditor/settlementExport';
 import { EventFinanceLinesPanel } from '../components/EventFinanceLinesPanel';
 import { EventRoleSetupPanel } from '../components/EventRoleSetupPanel';
+import { StaffingShiftClaimsPanel } from '../components/StaffingShiftClaimsPanel';
 import type {
   CommitmentDTO,
   CurrentWorkspaceDTO,
@@ -1717,7 +1718,7 @@ export function EventEditorView({ eventId }: { eventId: string }) {
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
                                 <p className="text-sm font-semibold text-fg-primary">{application.applicantName}</p>
-                                <p className="mt-1 text-sm text-fg-secondary">{application.applicantEmail}</p>
+                                <p className="mt-1 text-sm text-fg-secondary">{application.applicantEmail}{application.accountLinked ? ' · signed-in account' : ''}</p>
                               </div>
                               <span className="border border-stroke-subtle bg-surface-inset px-3 py-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-fg-primary">
                                 {application.status}
@@ -1937,10 +1938,20 @@ export function EventEditorView({ eventId }: { eventId: string }) {
                                     <span className="border border-stroke-subtle bg-surface-inset px-3 py-1">{staffingKindLabel(item.kind)}</span>
                                     <span className="border border-stroke-subtle bg-surface-inset px-3 py-1">{staffingWindowLabel(item)}</span>
                                     <span className="border border-stroke-subtle bg-surface-inset px-3 py-1">{item.assigneeName ?? 'Unassigned'}</span>
+                                    {item.kind === 'shift' ? <span className="border border-stroke-subtle bg-surface-inset px-3 py-1">{item.filledCount ?? 0}/{item.capacity ?? 1} places</span> : null}
                                   </div>
 
                                   {canManageStaffing ? (
                                     <div className="mt-4 space-y-3">
+                                      {item.kind === 'shift' ? (
+                                        <StaffingShiftClaimsPanel
+                                          eventId={event.id}
+                                          item={item}
+                                          roles={roles ?? []}
+                                          memberOptions={staffingAssigneeOptions.members}
+                                          onUpdated={(updated) => setStaffingItems((current) => sortRunOfShowItems((current ?? []).map((existing) => (existing.id === updated.id ? updated : existing))))}
+                                        />
+                                      ) : null}
 									  <form
 										key={`${item.id}:${item.updatedAt}`}
 										className="space-y-2"

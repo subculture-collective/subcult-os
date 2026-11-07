@@ -65,3 +65,13 @@ recoverable pre-migration backup and stop any lifecycle dispatcher before rollba
 This slice installs no dispatcher process. Do not erase action history, change
 unknown outcomes to pending, or remove the approval boundary to make an older
 application start. Recovery from a backup is a separate qualified operation.
+
+Version 31 adds open-shift self-claim. `event_staffing_items` gains
+`capacity` (1–100, default 1), `claims_open` (default false) and
+`release_cutoff_hours` (0–720, default 24). Every existing item keeps one
+place, stays closed to self-claim, and its existing assignee still occupies
+that place. `event_role_applications` gains a nullable `applicant_person_id`,
+null for every existing row. New tables `event_staffing_claim_roles` and
+`event_staffing_claims` start empty. A version-30 binary rejects this schema;
+roll back from a pre-migration backup and do not discard claim rows that
+participants rely on. See `docs/development/participant-portal.md`.

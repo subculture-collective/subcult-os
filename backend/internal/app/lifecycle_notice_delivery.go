@@ -33,9 +33,11 @@ func (a *App) lifecycleNoticeSendAllowed(ctx context.Context, outboxID, lease st
    and t.status in ('reserved','checked_in') and t.payment_status in ('free','pending','paid')))
  or (nr.source_type='crew_person' and exists(select 1 from people p
    join workspace_members wm on wm.person_id=p.id and wm.workspace_id=n.workspace_id
-   join event_staffing_items s on s.assigned_person_id=p.id and s.event_id=n.event_id and s.status='assigned'
    where p.id=nr.source_id and lower(btrim(p.email))=nr.recipient_email and wm.removed_at is null
-   and wm.revoked_at is null and (wm.expires_at is null or wm.expires_at>clock_timestamp())))
+   and wm.revoked_at is null and (wm.expires_at is null or wm.expires_at>clock_timestamp())
+   and (exists(select 1 from event_staffing_items s where s.assigned_person_id=p.id and s.event_id=n.event_id and s.status='assigned')
+     or exists(select 1 from event_staffing_claims c join event_staffing_items s on s.id=c.staffing_item_id
+       where c.person_id=p.id and c.event_id=n.event_id and c.status='active' and s.status in ('open','assigned')))))
  or (nr.source_type='crew_application' and exists(select 1 from event_role_applications ap
    join event_staffing_items s on s.assigned_application_id=ap.id and s.event_id=n.event_id and s.status='assigned'
    where ap.id=nr.source_id and ap.event_id=n.event_id and lower(btrim(ap.applicant_email))=nr.recipient_email

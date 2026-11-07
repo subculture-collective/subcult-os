@@ -296,6 +296,20 @@ export interface PublicArchiveItemDTO {
   createdAt: string;
 }
 
+export interface ParticipantOpenShiftDTO {
+  staffingItemId: string;
+  eventId: string;
+  eventTitle: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  participantRequirements: string;
+  remainingPlaces: number;
+  claimed: boolean;
+  canRelease: boolean;
+  releaseDeadline: string;
+}
+
 export interface ParticipantAssignmentDTO {
   eventId: string;
   eventTitle: string;

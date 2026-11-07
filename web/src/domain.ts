@@ -26,6 +26,20 @@ export interface ParticipantAssignmentDTO {
   participantRequirements: string;
 }
 
+export interface ParticipantOpenShiftDTO {
+  staffingItemId: string;
+  eventId: string;
+  eventTitle: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  participantRequirements: string;
+  remainingPlaces: number;
+  claimed: boolean;
+  canRelease: boolean;
+  releaseDeadline: string;
+}
+
 export interface ParticipantCommitmentDTO {
   id: string;
   eventId: string;
@@ -446,6 +460,7 @@ export interface EventRoleApplicationDTO {
   reviewedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  accountLinked?: boolean;
 }
 
 export interface EventStaffingItemDTO {
@@ -465,6 +480,21 @@ export interface EventStaffingItemDTO {
   updatedAt: string;
   completedAt?: string | null;
   completedByPersonId?: string | null;
+  capacity: number;
+  claimsOpen: boolean;
+  releaseCutoffHours: number;
+  claimRoleIds: string[];
+  filledCount: number;
+  claims: EventStaffingClaimDTO[];
+}
+
+/** Organizer-only record of one held place on a shift. */
+export interface EventStaffingClaimDTO {
+  id: string;
+  personId: string;
+  name: string;
+  source: 'self' | 'organizer';
+  createdAt: string;
 }
 
 export interface CreateEventStaffingRequestDTO {

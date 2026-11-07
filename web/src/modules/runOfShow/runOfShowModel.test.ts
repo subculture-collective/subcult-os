@@ -32,6 +32,12 @@ function staffingItem(overrides: Partial<EventStaffingItemDTO>): EventStaffingIt
 		updatedAt: '2026-06-18T09:00:00Z',
 		completedAt: null,
 		completedByPersonId: null,
+		capacity: 1,
+		claimsOpen: false,
+		releaseCutoffHours: 24,
+		claimRoleIds: [],
+		filledCount: 0,
+		claims: [],
 		...overrides,
 	};
 }

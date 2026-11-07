@@ -65,6 +65,9 @@ type eventRoleApplicationDTO struct {
 	ReviewedAt         *string `json:"reviewedAt,omitempty"`
 	CreatedAt          string  `json:"createdAt"`
 	UpdatedAt          string  `json:"updatedAt"`
+	// AccountLinked reports that a signed-in account with this verified email
+	// submitted the application, so an approval can let it claim shifts.
+	AccountLinked bool `json:"accountLinked"`
 }
 
 type eventParticipantDTO struct {
@@ -89,6 +92,7 @@ type eventRoleApplicationRow struct {
 	ReviewedAt         sql.NullTime
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	ApplicantPersonID  sql.NullString
 }
 
 type submitPublicRoleApplicationRequest struct {
@@ -499,12 +503,12 @@ func (a *App) handleReviewEventRoleApplication(w http.ResponseWriter, r *http.Re
 
 	var application eventRoleApplicationRow
 	if err := tx.QueryRow(r.Context(), `
-		select id, event_id, role_id, applicant_name, applicant_email, message, status, reviewed_by_person_id, reviewed_at, created_at, updated_at
+		select id, event_id, role_id, applicant_name, applicant_email, message, status, reviewed_by_person_id, reviewed_at, created_at, updated_at, applicant_person_id
 		from event_role_applications
 		where event_id = $1
 		  and id = $2
 		for update
-	`, event.ID, applicationID).Scan(&application.ID, &application.EventID, &application.RoleID, &application.ApplicantName, &application.ApplicantEmail, &application.Message, &application.Status, &application.ReviewedByPersonID, &application.ReviewedAt, &application.CreatedAt, &application.UpdatedAt); err != nil {
+	`, event.ID, applicationID).Scan(&application.ID, &application.EventID, &application.RoleID, &application.ApplicantName, &application.ApplicantEmail, &application.Message, &application.Status, &application.ReviewedByPersonID, &application.ReviewedAt, &application.CreatedAt, &application.UpdatedAt, &application.ApplicantPersonID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "application not found")
 			return
@@ -540,8 +544,8 @@ func (a *App) handleReviewEventRoleApplication(w http.ResponseWriter, r *http.Re
 		    reviewed_at = $3,
 		    updated_at = $3
 		where id = $4
-		returning id, event_id, role_id, applicant_name, applicant_email, message, status, reviewed_by_person_id, reviewed_at, created_at, updated_at
-	`, nextStatus, actorID, now, applicationID).Scan(&application.ID, &application.EventID, &application.RoleID, &application.ApplicantName, &application.ApplicantEmail, &application.Message, &application.Status, &application.ReviewedByPersonID, &application.ReviewedAt, &application.CreatedAt, &application.UpdatedAt); err != nil {
+		returning id, event_id, role_id, applicant_name, applicant_email, message, status, reviewed_by_person_id, reviewed_at, created_at, updated_at, applicant_person_id
+	`, nextStatus, actorID, now, applicationID).Scan(&application.ID, &application.EventID, &application.RoleID, &application.ApplicantName, &application.ApplicantEmail, &application.Message, &application.Status, &application.ReviewedByPersonID, &application.ReviewedAt, &application.CreatedAt, &application.UpdatedAt, &application.ApplicantPersonID); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not review application")
 		return
 	}
@@ -633,6 +637,23 @@ func (a *App) handleSubmitPublicRoleApplication(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// A signed-in submitter whose verified account email equals the submitted
+	// email binds the application to that account. Any other submission stays
+	// an unbound email record, as before.
+	var applicantPersonID any
+	if personID, ok := a.requirePersonID(r); ok {
+		var accountEmail string
+		if err := a.db.QueryRow(r.Context(), `
+			select p.email
+			from people p
+			join email_identities ei on ei.person_id = p.id
+			where p.id = $1
+			  and ei.verified_at is not null
+		`, personID).Scan(&accountEmail); err == nil && normalizeEmail(accountEmail) == applicantEmail {
+			applicantPersonID = personID
+		}
+	}
+
 	tx, err := a.db.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not start transaction")
@@ -642,10 +663,10 @@ func (a *App) handleSubmitPublicRoleApplication(w http.ResponseWriter, r *http.R
 
 	var application eventRoleApplicationRow
 	if err := tx.QueryRow(r.Context(), `
-		insert into event_role_applications (event_id, role_id, applicant_name, applicant_email, message, status)
-		values ($1, $2, $3, $4, $5, 'submitted')
-		returning id, event_id, role_id, applicant_name, applicant_email, message, status, created_at, updated_at
-	`, event.ID, role.ID, applicantName, applicantEmail, message).Scan(&application.ID, &application.EventID, &application.RoleID, &application.ApplicantName, &application.ApplicantEmail, &application.Message, &application.Status, &application.CreatedAt, &application.UpdatedAt); err != nil {
+		insert into event_role_applications (event_id, role_id, applicant_name, applicant_email, message, status, applicant_person_id)
+		values ($1, $2, $3, $4, $5, 'submitted', $6)
+		returning id, event_id, role_id, applicant_name, applicant_email, message, status, created_at, updated_at, applicant_person_id
+	`, event.ID, role.ID, applicantName, applicantEmail, message, applicantPersonID).Scan(&application.ID, &application.EventID, &application.RoleID, &application.ApplicantName, &application.ApplicantEmail, &application.Message, &application.Status, &application.CreatedAt, &application.UpdatedAt, &application.ApplicantPersonID); err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "application already submitted")
 			return
@@ -724,7 +745,7 @@ func (a *App) loadPublicActiveEventRole(ctx context.Context, eventID, roleID str
 
 func (a *App) loadEventRoleApplications(ctx context.Context, eventID string) ([]eventRoleApplicationRow, error) {
 	rows, err := a.db.Query(ctx, `
-		select id, event_id, role_id, applicant_name, applicant_email, message, status, reviewed_by_person_id, reviewed_at, created_at, updated_at
+		select id, event_id, role_id, applicant_name, applicant_email, message, status, reviewed_by_person_id, reviewed_at, created_at, updated_at, applicant_person_id
 		from event_role_applications
 		where event_id = $1
 		order by created_at asc, id asc
@@ -737,7 +758,7 @@ func (a *App) loadEventRoleApplications(ctx context.Context, eventID string) ([]
 	applications := make([]eventRoleApplicationRow, 0)
 	for rows.Next() {
 		var application eventRoleApplicationRow
-		if err := rows.Scan(&application.ID, &application.EventID, &application.RoleID, &application.ApplicantName, &application.ApplicantEmail, &application.Message, &application.Status, &application.ReviewedByPersonID, &application.ReviewedAt, &application.CreatedAt, &application.UpdatedAt); err != nil {
+		if err := rows.Scan(&application.ID, &application.EventID, &application.RoleID, &application.ApplicantName, &application.ApplicantEmail, &application.Message, &application.Status, &application.ReviewedByPersonID, &application.ReviewedAt, &application.CreatedAt, &application.UpdatedAt, &application.ApplicantPersonID); err != nil {
 			return nil, err
 		}
 		applications = append(applications, application)
@@ -811,6 +832,7 @@ func eventRoleApplicationDTOFromRow(row eventRoleApplicationRow) eventRoleApplic
 		ReviewedAt:         nullableTimeString(row.ReviewedAt),
 		CreatedAt:          row.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:          row.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		AccountLinked:      row.ApplicantPersonID.Valid,
 	}
 }
 

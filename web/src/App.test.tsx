@@ -125,6 +125,7 @@ describe('participant portal', () => {
     expect(rendered).toContain('Soundcheck');
 		expect(rendered).toContain('Bring a DI and arrive early.');
     expect(rendered).toContain('Bring cables');
+    expect(rendered).toContain('Shifts you can claim');
     expect(rendered).not.toContain('operator-only staffing note');
     expect(rendered).not.toContain('application-private-message');
   });
@@ -133,6 +134,7 @@ describe('participant portal', () => {
     const rendered = renderWithState('/participant', <ParticipantPortalView />, [null, false, 'forbidden', 1]);
 
     expect(rendered).toContain('forbidden');
+    expect(rendered).not.toContain('Shifts you can claim');
     expect(rendered).not.toContain('Soundcheck');
     expect(rendered).not.toContain('Bring cables');
   });

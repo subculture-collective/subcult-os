@@ -45,9 +45,12 @@ type App struct {
 	// error, without touching the database. Left nil in production, where
 	// processEmailDeliveries always calls the real checkSendPermission.
 	consentCheckOverride func(ctx context.Context, workspaceID, channel, recipient, purpose string) error
-	mux                  *http.ServeMux
-	loginMu              sync.Mutex
-	loginAttempts        map[string]loginAttempt
+	// now overrides the wall clock for shift claim and release windows in
+	// tests. Nil uses time.Now.
+	now           func() time.Time
+	mux           *http.ServeMux
+	loginMu       sync.Mutex
+	loginAttempts map[string]loginAttempt
 }
 
 func New(config Config, db *pgxpool.Pool) *App {
@@ -145,6 +148,10 @@ func (a *App) routes() {
 	a.mux.HandleFunc("POST /api/mobile/auth/recovery/complete", a.handleCompleteRecovery)
 	a.mux.HandleFunc("GET /api/me", a.handleMe)
 	a.mux.HandleFunc("GET /api/me/participant-portal", a.handleGetParticipantPortal)
+	a.mux.HandleFunc("GET /api/me/open-shifts", a.handleListOpenShifts)
+	a.mux.HandleFunc("POST /api/me/open-shifts/{staffingID}/claim", a.handleClaimOpenShift)
+	a.mux.HandleFunc("POST /api/me/open-shifts/{staffingID}/release", a.handleReleaseOpenShift)
+	a.mux.HandleFunc("POST /api/me/open-shifts/{staffingID}/release-request", a.handleRequestShiftRelease)
 	a.mux.HandleFunc("GET /api/debug/mobile-auth", a.handleMobileAuthDebug)
 	a.mux.HandleFunc("GET /api/dev/email-outbox", a.handleDevEmailOutbox)
 	a.mux.HandleFunc("GET /api/v1/auth/atproto/client-metadata", a.handleATProtoClientMetadata)
@@ -226,6 +233,8 @@ func (a *App) routes() {
 	a.mux.HandleFunc("GET /api/events/{eventID}/staffing", a.handleListEventStaffing)
 	a.mux.HandleFunc("POST /api/events/{eventID}/staffing", a.handleCreateEventStaffing)
 	a.mux.HandleFunc("PATCH /api/events/{eventID}/staffing/{staffingID}", a.handleUpdateEventStaffing)
+	a.mux.HandleFunc("POST /api/events/{eventID}/staffing/{staffingID}/claims", a.handleAddStaffingClaim)
+	a.mux.HandleFunc("DELETE /api/events/{eventID}/staffing/{staffingID}/claims/{claimID}", a.handleRemoveStaffingClaim)
 	a.mux.HandleFunc("GET /api/events/{eventID}/role-applications", a.handleListEventRoleApplications)
 	a.mux.HandleFunc("GET /api/events/{eventID}/participants", a.handleListEventParticipants)
 	a.mux.HandleFunc("PATCH /api/events/{eventID}/role-applications/{applicationID}", a.handleReviewEventRoleApplication)

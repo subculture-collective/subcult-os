@@ -18,6 +18,10 @@
       "required": ["eventId", "eventTitle", "staffingItemId", "title", "kind", "status", "participantRequirements"],
       "forbidden": ["notes", "assignedApplicationId", "applicantEmail", "message", "ticket", "paymentStatus", "amountCents", "currency", "settlement", "contact"]
     },
+    "ParticipantOpenShiftDTO": {
+      "required": ["staffingItemId", "eventId", "eventTitle", "title", "startsAt", "endsAt", "participantRequirements", "remainingPlaces", "claimed", "canRelease", "releaseDeadline"],
+      "forbidden": ["notes", "claims", "capacity", "assigneeName", "assignedPersonId", "assignedApplicationId", "personId", "name", "email", "applicantEmail", "applicantName", "message", "ticket", "paymentStatus", "amountCents", "currency", "settlement", "contact"]
+    },
     "WorkspaceSummaryDTO": {
       "required": ["id", "name", "role"]
     },

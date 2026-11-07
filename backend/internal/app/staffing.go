@@ -23,36 +23,46 @@ type createEventStaffingRequest struct {
 }
 
 type updateEventStaffingRequest struct {
-	Title                   *string `json:"title"`
-	Notes                   *string `json:"notes"`
-	ParticipantRequirements *string `json:"participantRequirements"`
-	StartsAt                *string `json:"startsAt"`
-	ClearStartsAt           bool    `json:"clearStartsAt"`
-	EndsAt                  *string `json:"endsAt"`
-	ClearEndsAt             bool    `json:"clearEndsAt"`
-	AssignedPersonID        *string `json:"assignedPersonId"`
-	AssignedApplicationID   *string `json:"assignedApplicationId"`
-	ClearAssignee           bool    `json:"clearAssignee"`
-	Status                  *string `json:"status"`
+	Title                   *string   `json:"title"`
+	Notes                   *string   `json:"notes"`
+	ParticipantRequirements *string   `json:"participantRequirements"`
+	StartsAt                *string   `json:"startsAt"`
+	ClearStartsAt           bool      `json:"clearStartsAt"`
+	EndsAt                  *string   `json:"endsAt"`
+	ClearEndsAt             bool      `json:"clearEndsAt"`
+	AssignedPersonID        *string   `json:"assignedPersonId"`
+	AssignedApplicationID   *string   `json:"assignedApplicationId"`
+	ClearAssignee           bool      `json:"clearAssignee"`
+	Status                  *string   `json:"status"`
+	Capacity                *int      `json:"capacity"`
+	ClaimsOpen              *bool     `json:"claimsOpen"`
+	ReleaseCutoffHours      *int      `json:"releaseCutoffHours"`
+	ClaimRoleIDs            *[]string `json:"claimRoleIds"`
 }
 
 type eventStaffingItemDTO struct {
-	ID                      string  `json:"id"`
-	EventID                 string  `json:"eventId"`
-	Title                   string  `json:"title"`
-	Kind                    string  `json:"kind"`
-	Notes                   string  `json:"notes"`
-	ParticipantRequirements string  `json:"participantRequirements"`
-	StartsAt                *string `json:"startsAt,omitempty"`
-	EndsAt                  *string `json:"endsAt,omitempty"`
-	AssignedPersonID        *string `json:"assignedPersonId,omitempty"`
-	AssignedApplicationID   *string `json:"assignedApplicationId,omitempty"`
-	AssigneeName            *string `json:"assigneeName,omitempty"`
-	Status                  string  `json:"status"`
-	CreatedAt               string  `json:"createdAt"`
-	UpdatedAt               string  `json:"updatedAt"`
-	CompletedAt             *string `json:"completedAt,omitempty"`
-	CompletedByPersonID     *string `json:"completedByPersonId,omitempty"`
+	ID                      string             `json:"id"`
+	EventID                 string             `json:"eventId"`
+	Title                   string             `json:"title"`
+	Kind                    string             `json:"kind"`
+	Notes                   string             `json:"notes"`
+	ParticipantRequirements string             `json:"participantRequirements"`
+	StartsAt                *string            `json:"startsAt,omitempty"`
+	EndsAt                  *string            `json:"endsAt,omitempty"`
+	AssignedPersonID        *string            `json:"assignedPersonId,omitempty"`
+	AssignedApplicationID   *string            `json:"assignedApplicationId,omitempty"`
+	AssigneeName            *string            `json:"assigneeName,omitempty"`
+	Status                  string             `json:"status"`
+	CreatedAt               string             `json:"createdAt"`
+	UpdatedAt               string             `json:"updatedAt"`
+	CompletedAt             *string            `json:"completedAt,omitempty"`
+	CompletedByPersonID     *string            `json:"completedByPersonId,omitempty"`
+	Capacity                int                `json:"capacity"`
+	ClaimsOpen              bool               `json:"claimsOpen"`
+	ReleaseCutoffHours      int                `json:"releaseCutoffHours"`
+	ClaimRoleIDs            []string           `json:"claimRoleIds"`
+	FilledCount             int                `json:"filledCount"`
+	Claims                  []staffingClaimDTO `json:"claims"`
 }
 
 type eventStaffingItemRow struct {
@@ -72,6 +82,9 @@ type eventStaffingItemRow struct {
 	UpdatedAt               time.Time
 	CompletedAt             sql.NullTime
 	CompletedByPersonID     sql.NullString
+	Capacity                int
+	ClaimsOpen              bool
+	ReleaseCutoffHours      int
 }
 
 type staffingRowQuerier interface {
@@ -101,7 +114,8 @@ func (a *App) handleListEventStaffing(w http.ResponseWriter, r *http.Request) {
 		select esi.id, esi.event_id, esi.title, esi.kind, esi.notes, esi.participant_requirements, esi.starts_at, esi.ends_at,
 		       esi.assigned_person_id, esi.assigned_application_id,
 		       coalesce(nullif(trim(p.display_name), ''), p.email, era.applicant_name) as assignee_name,
-		       esi.status, esi.created_at, esi.updated_at, esi.completed_at, esi.completed_by_person_id
+		       esi.status, esi.created_at, esi.updated_at, esi.completed_at, esi.completed_by_person_id,
+		       esi.capacity, esi.claims_open, esi.release_cutoff_hours
 		from event_staffing_items esi
 		left join people p on p.id = esi.assigned_person_id
 		left join event_role_applications era on era.id = esi.assigned_application_id
@@ -123,13 +137,18 @@ func (a *App) handleListEventStaffing(w http.ResponseWriter, r *http.Request) {
 	items := make([]eventStaffingItemDTO, 0)
 	for rows.Next() {
 		var row eventStaffingItemRow
-		if err := rows.Scan(&row.ID, &row.EventID, &row.Title, &row.Kind, &row.Notes, &row.ParticipantRequirements, &row.StartsAt, &row.EndsAt, &row.AssignedPersonID, &row.AssignedApplicationID, &row.AssigneeName, &row.Status, &row.CreatedAt, &row.UpdatedAt, &row.CompletedAt, &row.CompletedByPersonID); err != nil {
+		if err := rows.Scan(&row.ID, &row.EventID, &row.Title, &row.Kind, &row.Notes, &row.ParticipantRequirements, &row.StartsAt, &row.EndsAt, &row.AssignedPersonID, &row.AssignedApplicationID, &row.AssigneeName, &row.Status, &row.CreatedAt, &row.UpdatedAt, &row.CompletedAt, &row.CompletedByPersonID, &row.Capacity, &row.ClaimsOpen, &row.ReleaseCutoffHours); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not load staffing")
 			return
 		}
 		items = append(items, eventStaffingItemDTOFromRow(row))
 	}
 	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load staffing")
+		return
+	}
+	rows.Close()
+	if err := attachStaffingClaims(r.Context(), a.db, event.ID, items); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load staffing")
 		return
 	}
@@ -245,10 +264,12 @@ func (a *App) handleCreateEventStaffing(w http.ResponseWriter, r *http.Request) 
 		returning id, event_id, title, kind, notes, participant_requirements, starts_at, ends_at,
 		          assigned_person_id, assigned_application_id,
 		          null as assignee_name,
-		          status, created_at, updated_at, completed_at, completed_by_person_id
+		          status, created_at, updated_at, completed_at, completed_by_person_id,
+		          capacity, claims_open, release_cutoff_hours
 	`, lockedEventID, title, kind, notes, participantRequirements, startsAtArg, endsAtArg, actorID).Scan(
 		&row.ID, &row.EventID, &row.Title, &row.Kind, &row.Notes, &row.ParticipantRequirements, &row.StartsAt, &row.EndsAt,
 		&row.AssignedPersonID, &row.AssignedApplicationID, &row.AssigneeName, &row.Status, &row.CreatedAt, &row.UpdatedAt, &row.CompletedAt, &row.CompletedByPersonID,
+		&row.Capacity, &row.ClaimsOpen, &row.ReleaseCutoffHours,
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create staffing item")
 		return
@@ -372,6 +393,35 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 			requestedStatus = &status
 		default:
 			writeError(w, http.StatusBadRequest, "invalid status")
+			return
+		}
+	}
+	if req.Capacity != nil && (*req.Capacity < 1 || *req.Capacity > maxStaffingCapacity) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("capacity must be between 1 and %d", maxStaffingCapacity))
+		return
+	}
+	if req.ReleaseCutoffHours != nil && (*req.ReleaseCutoffHours < 0 || *req.ReleaseCutoffHours > maxStaffingReleaseCutoffHours) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("releaseCutoffHours must be between 0 and %d", maxStaffingReleaseCutoffHours))
+		return
+	}
+	var requestedRoleIDs []string
+	if req.ClaimRoleIDs != nil {
+		requestedRoleIDs = make([]string, 0, len(*req.ClaimRoleIDs))
+		seen := make(map[string]struct{}, len(*req.ClaimRoleIDs))
+		for _, raw := range *req.ClaimRoleIDs {
+			roleID := strings.ToLower(strings.TrimSpace(raw))
+			if !validUUID(roleID) {
+				writeError(w, http.StatusBadRequest, "claimRoleIds must be roles of this event")
+				return
+			}
+			if _, ok := seen[roleID]; ok {
+				continue
+			}
+			seen[roleID] = struct{}{}
+			requestedRoleIDs = append(requestedRoleIDs, roleID)
+		}
+		if len(requestedRoleIDs) > 50 {
+			writeError(w, http.StatusBadRequest, "claimRoleIds must contain 50 roles or fewer")
 			return
 		}
 	}
@@ -511,6 +561,58 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 		newRow.AssignedPersonID = sql.NullString{}
 	}
 
+	if req.Capacity != nil && *req.Capacity != current.Capacity {
+		newRow.Capacity = *req.Capacity
+		changed = true
+	}
+	policyChanged := newRow.Capacity != current.Capacity
+	if req.ClaimsOpen != nil && *req.ClaimsOpen != current.ClaimsOpen {
+		newRow.ClaimsOpen = *req.ClaimsOpen
+		changed = true
+	}
+	if req.ReleaseCutoffHours != nil && *req.ReleaseCutoffHours != current.ReleaseCutoffHours {
+		newRow.ReleaseCutoffHours = *req.ReleaseCutoffHours
+		changed = true
+	}
+	currentRoleIDs, err := loadStaffingClaimRoleIDs(r.Context(), tx, current.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load staffing item")
+		return
+	}
+	nextRoleIDs := currentRoleIDs
+	rolesChanged := false
+	if requestedRoleIDs != nil {
+		var matched int
+		if err := tx.QueryRow(r.Context(), `
+			select count(*) from event_roles where event_id = $1 and id = any($2::uuid[])
+		`, lockedEventID, requestedRoleIDs).Scan(&matched); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load roles")
+			return
+		}
+		if matched != len(requestedRoleIDs) {
+			writeError(w, http.StatusBadRequest, "claimRoleIds must be roles of this event")
+			return
+		}
+		if !sameStringSet(currentRoleIDs, requestedRoleIDs) {
+			nextRoleIDs = requestedRoleIDs
+			rolesChanged = true
+			changed = true
+		}
+	}
+	policyChanged = policyChanged || rolesChanged || newRow.ClaimsOpen != current.ClaimsOpen || newRow.ReleaseCutoffHours != current.ReleaseCutoffHours
+	claimCount, err := countActiveStaffingClaims(r.Context(), tx, current.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not count assignments")
+		return
+	}
+	filledOld, filledNew := claimCount, claimCount
+	if current.AssignedPersonID.Valid || current.AssignedApplicationID.Valid {
+		filledOld++
+	}
+	if newRow.AssignedPersonID.Valid || newRow.AssignedApplicationID.Valid {
+		filledNew++
+	}
+
 	if requestedStatus != nil {
 		if current.Status != *requestedStatus {
 			changed = true
@@ -528,12 +630,16 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 			newRow.CompletedAt = sql.NullTime{}
 			newRow.CompletedByPersonID = sql.NullString{}
 		}
-	} else {
-		if req.ClearAssignee && current.Status == "assigned" && newRow.Status != "open" {
-			newRow.Status = "open"
-			changed = true
-		} else if (requestedPersonID != nil || requestedApplicationID != nil) && current.Status == "open" && newRow.Status != "assigned" {
-			newRow.Status = "assigned"
+	} else if (req.ClearAssignee || requestedPersonID != nil || requestedApplicationID != nil || newRow.Capacity != current.Capacity) &&
+		(current.Status == "open" || current.Status == "assigned") {
+		// Open while places remain, assigned once every place is held. With
+		// the legacy capacity of 1 this matches the earlier assign/clear rule.
+		fillStatus := "open"
+		if filledNew >= newRow.Capacity {
+			fillStatus = "assigned"
+		}
+		if newRow.Status != fillStatus {
+			newRow.Status = fillStatus
 			changed = true
 		}
 	}
@@ -543,11 +649,48 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusInternalServerError, "could not save staffing item")
 			return
 		}
-		writeJSON(w, http.StatusOK, eventStaffingItemDTOFromRow(current))
+		items := []eventStaffingItemDTO{eventStaffingItemDTOFromRow(current)}
+		if err := attachStaffingClaims(r.Context(), a.db, lockedEventID, items); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load staffing item")
+			return
+		}
+		writeJSON(w, http.StatusOK, items[0])
 		return
 	}
 	if eventStatusIsClosed(eventStatus) {
 		writeError(w, http.StatusConflict, "event is closed")
+		return
+	}
+	if filledNew > newRow.Capacity && (filledNew > filledOld || newRow.Capacity < current.Capacity) {
+		writeError(w, http.StatusConflict, "shift capacity reached")
+		return
+	}
+	if requestedPersonID != nil && assignmentChanged {
+		var claimHeld bool
+		if err := tx.QueryRow(r.Context(), `
+			select exists (select 1 from event_staffing_claims where staffing_item_id = $1 and person_id = $2 and status = 'active')
+		`, current.ID, *requestedPersonID).Scan(&claimHeld); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not check assignments")
+			return
+		}
+		if claimHeld {
+			writeError(w, http.StatusConflict, "person already holds a place on this shift")
+			return
+		}
+		if newRow.StartsAt.Valid && newRow.EndsAt.Valid {
+			overlaps, err := staffingPersonOverlaps(r.Context(), tx, lockedEventID, current.ID, *requestedPersonID, newRow.StartsAt.Time, newRow.EndsAt.Time)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "could not check schedule")
+				return
+			}
+			if overlaps {
+				writeError(w, http.StatusConflict, "person holds another overlapping shift for this event")
+				return
+			}
+		}
+	}
+	if newRow.ClaimsOpen && (newRow.Kind != "shift" || !newRow.StartsAt.Valid || !newRow.EndsAt.Valid || len(nextRoleIDs) == 0) {
+		writeError(w, http.StatusBadRequest, "open claims require a shift with start and end times and at least one eligible role")
 		return
 	}
 
@@ -587,12 +730,29 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 		    status = $10,
 		    completed_at = $11,
 		    completed_by_person_id = $12,
+		    capacity = $13,
+		    claims_open = $14,
+		    release_cutoff_hours = $15,
 		    updated_at = now()
 		where event_id = $1
 		  and id = $2
-	`, lockedEventID, current.ID, newRow.Title, newRow.Notes, newRow.ParticipantRequirements, startsAtArg, endsAtArg, assignedPersonArg, assignedApplicationArg, newRow.Status, completedAtArg, completedByArg); err != nil {
+	`, lockedEventID, current.ID, newRow.Title, newRow.Notes, newRow.ParticipantRequirements, startsAtArg, endsAtArg, assignedPersonArg, assignedApplicationArg, newRow.Status, completedAtArg, completedByArg,
+		newRow.Capacity, newRow.ClaimsOpen, newRow.ReleaseCutoffHours); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not update staffing item")
 		return
+	}
+	if rolesChanged {
+		if _, err := tx.Exec(r.Context(), `delete from event_staffing_claim_roles where staffing_item_id = $1`, current.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not update eligible roles")
+			return
+		}
+		if _, err := tx.Exec(r.Context(), `
+			insert into event_staffing_claim_roles (staffing_item_id, role_id)
+			select $1, unnest($2::uuid[])
+		`, current.ID, nextRoleIDs); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not update eligible roles")
+			return
+		}
 	}
 
 	updated, err := loadEventStaffingItemRow(r.Context(), tx, lockedEventID, current.ID)
@@ -624,15 +784,27 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	}
-	if err := a.audit(txCtx, actorID, "staffing.updated", "event_staffing_item", updated.ID, map[string]any{
+	auditMetadata := map[string]any{
 		"eventId":               lockedEventID,
 		"staffingItemId":        updated.ID,
 		"previousStatus":        current.Status,
 		"status":                updated.Status,
 		"assignedPersonId":      nullableString(updated.AssignedPersonID),
 		"assignedApplicationId": nullableString(updated.AssignedApplicationID),
-	}); err != nil {
+	}
+	if policyChanged {
+		auditMetadata["capacity"] = updated.Capacity
+		auditMetadata["claimsOpen"] = updated.ClaimsOpen
+		auditMetadata["releaseCutoffHours"] = updated.ReleaseCutoffHours
+		auditMetadata["claimRoleIds"] = nextRoleIDs
+	}
+	if err := a.audit(txCtx, actorID, "staffing.updated", "event_staffing_item", updated.ID, auditMetadata); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not record audit")
+		return
+	}
+	items := []eventStaffingItemDTO{eventStaffingItemDTOFromRow(updated)}
+	if err := attachStaffingClaims(r.Context(), tx, lockedEventID, items); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load staffing item")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
@@ -640,7 +812,42 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, eventStaffingItemDTOFromRow(updated))
+	writeJSON(w, http.StatusOK, items[0])
+}
+
+func loadStaffingClaimRoleIDs(ctx context.Context, tx pgx.Tx, itemID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		select role_id from event_staffing_claim_roles where staffing_item_id = $1 order by created_at, role_id
+	`, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	roleIDs := make([]string, 0)
+	for rows.Next() {
+		var roleID string
+		if err := rows.Scan(&roleID); err != nil {
+			return nil, err
+		}
+		roleIDs = append(roleIDs, roleID)
+	}
+	return roleIDs, rows.Err()
+}
+
+func sameStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	set := make(map[string]struct{}, len(left))
+	for _, value := range left {
+		set[value] = struct{}{}
+	}
+	for _, value := range right {
+		if _, ok := set[value]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func eventStaffingItemDTOFromRow(row eventStaffingItemRow) eventStaffingItemDTO {
@@ -654,6 +861,14 @@ func eventStaffingItemDTOFromRow(row eventStaffingItemRow) eventStaffingItemDTO 
 		Status:                  row.Status,
 		CreatedAt:               row.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:               row.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Capacity:                row.Capacity,
+		ClaimsOpen:              row.ClaimsOpen,
+		ReleaseCutoffHours:      row.ReleaseCutoffHours,
+		ClaimRoleIDs:            []string{},
+		Claims:                  []staffingClaimDTO{},
+	}
+	if row.AssignedPersonID.Valid || row.AssignedApplicationID.Valid {
+		dto.FilledCount = 1
 	}
 	dto.StartsAt = nullableTimeString(row.StartsAt)
 	dto.EndsAt = nullableTimeString(row.EndsAt)
@@ -682,14 +897,15 @@ func loadEventStaffingItemRow(ctx context.Context, q staffingRowQuerier, eventID
 		select esi.id, esi.event_id, esi.title, esi.kind, esi.notes, esi.participant_requirements, esi.starts_at, esi.ends_at,
 		       esi.assigned_person_id, esi.assigned_application_id,
 		       coalesce(nullif(trim(p.display_name), ''), p.email, era.applicant_name) as assignee_name,
-		       esi.status, esi.created_at, esi.updated_at, esi.completed_at, esi.completed_by_person_id
+		       esi.status, esi.created_at, esi.updated_at, esi.completed_at, esi.completed_by_person_id,
+		       esi.capacity, esi.claims_open, esi.release_cutoff_hours
 		from event_staffing_items esi
 		left join people p on p.id = esi.assigned_person_id
 		left join event_role_applications era on era.id = esi.assigned_application_id
 		where esi.event_id = $1
 		  and esi.id = $2
 		for update of esi
-	`, eventID, staffingID).Scan(&row.ID, &row.EventID, &row.Title, &row.Kind, &row.Notes, &row.ParticipantRequirements, &row.StartsAt, &row.EndsAt, &row.AssignedPersonID, &row.AssignedApplicationID, &row.AssigneeName, &row.Status, &row.CreatedAt, &row.UpdatedAt, &row.CompletedAt, &row.CompletedByPersonID); err != nil {
+	`, eventID, staffingID).Scan(&row.ID, &row.EventID, &row.Title, &row.Kind, &row.Notes, &row.ParticipantRequirements, &row.StartsAt, &row.EndsAt, &row.AssignedPersonID, &row.AssignedApplicationID, &row.AssigneeName, &row.Status, &row.CreatedAt, &row.UpdatedAt, &row.CompletedAt, &row.CompletedByPersonID, &row.Capacity, &row.ClaimsOpen, &row.ReleaseCutoffHours); err != nil {
 		return eventStaffingItemRow{}, err
 	}
 	return row, nil

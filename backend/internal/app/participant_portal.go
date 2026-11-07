@@ -42,7 +42,9 @@ type participantPortalLoad struct {
 }
 
 // handleGetParticipantPortal returns a participant's own person-backed
-// staffing assignments and commitments. It does not use application names or
+// staffing assignments (organizer-assigned or claimed shift places) and
+// commitments. A held place reads as assigned to its holder even while other
+// places on the shift remain open. It does not use application names or
 // emails as an account identity, and it does not expose operator notes,
 // contacts, finance, or payout data.
 func (a *App) handleGetParticipantPortal(w http.ResponseWriter, r *http.Request) {
@@ -83,11 +85,16 @@ func (a *App) loadParticipantPortal(ctx context.Context, personID string) (parti
 	}
 	assignments, err := a.db.Query(ctx, `
 		select e.workspace_id, e.id, e.title, esi.id, esi.title, esi.kind,
-		       esi.starts_at, esi.ends_at, esi.status, esi.participant_requirements
+		       esi.starts_at, esi.ends_at,
+		       case when esi.status = 'open' then 'assigned' else esi.status end,
+		       esi.participant_requirements
 		from event_staffing_items esi
 		join events e on e.id = esi.event_id
 		join workspace_members wm on wm.workspace_id = e.workspace_id
-		where esi.assigned_person_id = $1
+		where (esi.assigned_person_id = $1 or exists (
+			select 1 from event_staffing_claims c
+			where c.staffing_item_id = esi.id and c.person_id = $1 and c.status = 'active'
+		  ))
 		  and wm.person_id = $1
 		  and wm.removed_at is null
 		  and wm.revoked_at is null
@@ -130,7 +137,10 @@ func (a *App) loadParticipantPortal(ctx context.Context, personID string) (parti
 			select 1
 			from event_staffing_items esi
 			where esi.event_id = e.id
-			  and esi.assigned_person_id = $1
+			  and (esi.assigned_person_id = $1 or exists (
+				select 1 from event_staffing_claims c
+				where c.staffing_item_id = esi.id and c.person_id = $1 and c.status = 'active'
+			  ))
 			  and esi.status <> 'cancelled'
 		  )
 		order by c.due_at nulls last, c.created_at, c.id
