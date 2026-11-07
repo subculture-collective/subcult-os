@@ -307,6 +307,7 @@ export interface ParticipantOpenShiftDTO {
   remainingPlaces: number;
   claimed: boolean;
   canRelease: boolean;
+  organizerManaged: boolean;
   releaseDeadline: string;
 }
 

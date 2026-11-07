@@ -49,7 +49,11 @@ type participantOpenShiftDTO struct {
 	RemainingPlaces         int    `json:"remainingPlaces"`
 	Claimed                 bool   `json:"claimed"`
 	CanRelease              bool   `json:"canRelease"`
-	ReleaseDeadline         string `json:"releaseDeadline"`
+	// OrganizerManaged marks a place held through the organizer's single
+	// assignment. Only the organizer can change it, so the portal offers no
+	// release or release request for it.
+	OrganizerManaged bool   `json:"organizerManaged"`
+	ReleaseDeadline  string `json:"releaseDeadline"`
 }
 
 type addStaffingClaimRequest struct {
@@ -73,7 +77,24 @@ type staffingPlace struct {
 	ClaimsOpen              bool
 	LegacyPersonID          sql.NullString
 	LegacyApplicationID     sql.NullString
-	Filled                  int
+	// LegacyHolderPersonID is the person behind the single assignment: the
+	// assigned person, or the account an assigned application is bound to.
+	LegacyHolderPersonID sql.NullString
+	Filled               int
+}
+
+// legacyHeldBy reports whether the single assignment belongs to personID.
+func (p staffingPlace) legacyHeldBy(personID string) bool {
+	return p.LegacyHolderPersonID.Valid && p.LegacyHolderPersonID.String == personID
+}
+
+// staffingLegacyHolderSQL is the person who holds an item's single
+// assignment: assigned_person_id, or else the account bound to
+// assigned_application_id. alias names the event_staffing_items row. Every
+// duplicate and overlap check uses it so an application-based assignment is
+// recognised as the same person who later claims or is added.
+func staffingLegacyHolderSQL(alias string) string {
+	return "coalesce(" + alias + ".assigned_person_id, (select lha.applicant_person_id from event_role_applications lha where lha.id = " + alias + ".assigned_application_id))"
 }
 
 func (p staffingPlace) remaining() int {
@@ -131,15 +152,16 @@ func lockStaffingPlace(ctx context.Context, tx pgx.Tx, eventID, itemID string) (
 		return place, err
 	}
 	if err := tx.QueryRow(ctx, `
-		select id, title, kind, status, participant_requirements, starts_at, ends_at,
-		       capacity, release_cutoff_hours, claims_open, assigned_person_id, assigned_application_id
-		from event_staffing_items
-		where id = $1
-		  and event_id = $2
-		for update
+		select esi.id, esi.title, esi.kind, esi.status, esi.participant_requirements, esi.starts_at, esi.ends_at,
+		       esi.capacity, esi.release_cutoff_hours, esi.claims_open, esi.assigned_person_id, esi.assigned_application_id,
+		       `+staffingLegacyHolderSQL("esi")+`
+		from event_staffing_items esi
+		where esi.id = $1
+		  and esi.event_id = $2
+		for update of esi
 	`, itemID, place.EventID).Scan(&place.ItemID, &place.Title, &place.Kind, &place.Status, &place.ParticipantRequirements,
 		&place.StartsAt, &place.EndsAt, &place.Capacity, &place.ReleaseCutoffHours, &place.ClaimsOpen,
-		&place.LegacyPersonID, &place.LegacyApplicationID); err != nil {
+		&place.LegacyPersonID, &place.LegacyApplicationID, &place.LegacyHolderPersonID); err != nil {
 		return place, err
 	}
 	claims, err := countActiveStaffingClaims(ctx, tx, place.ItemID)
@@ -236,7 +258,7 @@ func staffingPersonOverlaps(ctx context.Context, tx pgx.Tx, eventID, itemID, per
 			  and o.starts_at < $5
 			  and o.ends_at > $4
 			  and (
-				o.assigned_person_id = $3
+				`+staffingLegacyHolderSQL("o")+` = $3
 				or exists (
 					select 1
 					from event_staffing_claims c
@@ -274,6 +296,7 @@ func syncStaffingFillStatus(ctx context.Context, tx pgx.Tx, itemID string) error
 }
 
 func openShiftDTOFromPlace(place staffingPlace, claimed, ownClaim bool, now time.Time) participantOpenShiftDTO {
+	organizerManaged := claimed && !ownClaim
 	dto := participantOpenShiftDTO{
 		StaffingItemID:          place.ItemID,
 		EventID:                 place.EventID,
@@ -282,6 +305,7 @@ func openShiftDTOFromPlace(place staffingPlace, claimed, ownClaim bool, now time
 		ParticipantRequirements: place.ParticipantRequirements,
 		RemainingPlaces:         place.remaining(),
 		Claimed:                 claimed,
+		OrganizerManaged:        organizerManaged,
 	}
 	if place.StartsAt.Valid {
 		dto.StartsAt = place.StartsAt.Time.UTC().Format(time.RFC3339Nano)
@@ -312,7 +336,7 @@ func (a *App) handleListOpenShifts(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.db.Query(r.Context(), `
 		select e.workspace_id, e.id, e.title, e.status, esi.id, esi.title, esi.kind, esi.status, esi.participant_requirements,
 		       esi.starts_at, esi.ends_at, esi.capacity, esi.release_cutoff_hours, esi.claims_open,
-		       esi.assigned_person_id, esi.assigned_application_id,
+		       esi.assigned_person_id, esi.assigned_application_id, `+staffingLegacyHolderSQL("esi")+`,
 		       (select count(*) from event_staffing_claims c where c.staffing_item_id = esi.id and c.status = 'active') as claim_count,
 		       exists (select 1 from event_staffing_claims c where c.staffing_item_id = esi.id and c.person_id = $1 and c.status = 'active') as own_claim
 		from event_staffing_items esi
@@ -354,7 +378,8 @@ func (a *App) handleListOpenShifts(w http.ResponseWriter, r *http.Request) {
 		var ownClaim bool
 		if err := rows.Scan(&place.WorkspaceID, &place.EventID, &place.EventTitle, &place.EventStatus, &place.ItemID, &place.Title,
 			&place.Kind, &place.Status, &place.ParticipantRequirements, &place.StartsAt, &place.EndsAt, &place.Capacity,
-			&place.ReleaseCutoffHours, &place.ClaimsOpen, &place.LegacyPersonID, &place.LegacyApplicationID, &claimCount, &ownClaim); err != nil {
+			&place.ReleaseCutoffHours, &place.ClaimsOpen, &place.LegacyPersonID, &place.LegacyApplicationID, &place.LegacyHolderPersonID,
+			&claimCount, &ownClaim); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not load open shifts")
 			return
 		}
@@ -362,7 +387,7 @@ func (a *App) handleListOpenShifts(w http.ResponseWriter, r *http.Request) {
 		if place.LegacyPersonID.Valid || place.LegacyApplicationID.Valid {
 			place.Filled++
 		}
-		held := ownClaim || (place.LegacyPersonID.Valid && place.LegacyPersonID.String == personID)
+		held := ownClaim || place.legacyHeldBy(personID)
 		workspaceIDs[place.WorkspaceID] = struct{}{}
 		shifts = append(shifts, openShiftDTOFromPlace(place, held, ownClaim, now))
 	}
@@ -420,7 +445,7 @@ func (a *App) handleClaimOpenShift(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not load claim")
 		return
 	}
-	if existingClaimID != "" || (place.LegacyPersonID.Valid && place.LegacyPersonID.String == personID) {
+	if existingClaimID != "" || place.legacyHeldBy(personID) {
 		if err := tx.Commit(ctx); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not load claim")
 			return
@@ -531,7 +556,7 @@ func (a *App) handleReleaseOpenShift(w http.ResponseWriter, r *http.Request) {
 	now := a.currentTime()
 	claimID, err := activeStaffingClaimID(ctx, tx, place.ItemID, personID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if place.LegacyPersonID.Valid && place.LegacyPersonID.String == personID {
+		if place.legacyHeldBy(personID) {
 			writeError(w, http.StatusConflict, "this assignment is managed by the organizer; ask the organizer to change it")
 			return
 		}
@@ -606,7 +631,9 @@ func (a *App) handleReleaseOpenShift(w http.ResponseWriter, r *http.Request) {
 // handleRequestShiftRelease is the organizer contact action shown after the
 // release cutoff. It queues a private notification to the workspace owners;
 // it never reveals an owner's address to the participant and does not
-// release the place by itself.
+// release the place by itself. Before the cutoff the participant can release
+// the place directly, so the request is refused. Repeat requests reuse the
+// first notification and write no further audit rows.
 func (a *App) handleRequestShiftRelease(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, no-store")
 	if a.db == nil {
@@ -652,6 +679,14 @@ func (a *App) handleRequestShiftRelease(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, "event is closed")
 		return
 	}
+	if !place.accepting() {
+		writeError(w, http.StatusConflict, "shift is closed")
+		return
+	}
+	if place.StartsAt.Valid && staffingReleaseAllowed(a.currentTime(), place.StartsAt.Time, place.ReleaseCutoffHours) {
+		writeError(w, http.StatusConflict, "the release window is still open; release the place yourself")
+		return
+	}
 
 	var requesterName string
 	if err := tx.QueryRow(ctx, `select coalesce(nullif(trim(display_name), ''), 'A participant') from people where id = $1`, personID).Scan(&requesterName); err != nil {
@@ -690,9 +725,10 @@ func (a *App) handleRequestShiftRelease(w http.ResponseWriter, r *http.Request) 
 	}
 
 	txCtx := context.WithValue(ctx, txContextKey{}, tx)
+	queued := false
 	for _, email := range ownerEmails {
 		recipient := normalizeEmail(email)
-		if _, err := a.enqueueNotification(txCtx, tx, enqueueNotificationParams{
+		created, err := a.enqueueNotification(txCtx, tx, enqueueNotificationParams{
 			WorkspaceID:       place.WorkspaceID,
 			EventID:           place.EventID,
 			RecipientEmail:    recipient,
@@ -704,17 +740,21 @@ func (a *App) handleRequestShiftRelease(w http.ResponseWriter, r *http.Request) 
 			Body:              fmt.Sprintf("%s asked to be released from %s at %s. Open the staffing board to release or keep the place.", requesterName, place.Title, place.EventTitle),
 			Preview:           fmt.Sprintf("Release request for %s", place.Title),
 			CreatedByPersonID: personID,
-		}); err != nil {
+		})
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not enqueue notification")
 			return
 		}
+		queued = queued || created
 	}
-	if err := a.audit(txCtx, personID, "staffing.release_requested", "event_staffing_claim", claimID, map[string]any{
-		"eventId":        place.EventID,
-		"staffingItemId": place.ItemID,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not record audit")
-		return
+	if queued {
+		if err := a.audit(txCtx, personID, "staffing.release_requested", "event_staffing_claim", claimID, map[string]any{
+			"eventId":        place.EventID,
+			"staffingItemId": place.ItemID,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not record audit")
+			return
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save request")
@@ -791,7 +831,7 @@ func (a *App) handleAddStaffingClaim(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not load claim")
 		return
 	}
-	if existingClaimID == "" && !(place.LegacyPersonID.Valid && place.LegacyPersonID.String == targetID) {
+	if existingClaimID == "" && !place.legacyHeldBy(targetID) {
 		if place.StartsAt.Valid && place.EndsAt.Valid {
 			overlaps, err := staffingPersonOverlaps(ctx, tx, place.EventID, place.ItemID, targetID, place.StartsAt.Time, place.EndsAt.Time)
 			if err != nil {
@@ -938,7 +978,7 @@ func (a *App) writeLockedStaffingItem(w http.ResponseWriter, r *http.Request, tx
 		return
 	}
 	items := []eventStaffingItemDTO{eventStaffingItemDTOFromRow(row)}
-	if err := attachStaffingClaims(ctx, tx, place.EventID, items); err != nil {
+	if err := attachStaffingClaims(ctx, tx, place.EventID, items, true); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load staffing item")
 		return
 	}
@@ -949,9 +989,12 @@ func (a *App) writeLockedStaffingItem(w http.ResponseWriter, r *http.Request, tx
 	writeJSON(w, http.StatusOK, items[0])
 }
 
-// attachStaffingClaims adds the organizer-only place list, eligible-role
-// policy and filled count to staffing DTOs of one event.
-func attachStaffingClaims(ctx context.Context, q staffingQuerier, eventID string, items []eventStaffingItemDTO) error {
+// attachStaffingClaims adds the eligible-role policy and filled count to
+// staffing DTOs of one event. Holder identities (the claims list) are added
+// only when includeHolders is set, which callers do for workspace owners, the
+// role that manages staffing. A holder is named by display name only, never
+// by email.
+func attachStaffingClaims(ctx context.Context, q staffingQuerier, eventID string, items []eventStaffingItemDTO, includeHolders bool) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -961,7 +1004,7 @@ func attachStaffingClaims(ctx context.Context, q staffingQuerier, eventID string
 	}
 	claims, err := q.Query(ctx, `
 		select c.id, c.staffing_item_id, c.person_id,
-		       coalesce(nullif(trim(p.display_name), ''), p.email), c.source, c.created_at
+		       coalesce(nullif(trim(p.display_name), ''), 'Member'), c.source, c.created_at
 		from event_staffing_claims c
 		join people p on p.id = c.person_id
 		where c.event_id = $1
@@ -981,7 +1024,9 @@ func attachStaffingClaims(ctx context.Context, q staffingQuerier, eventID string
 		}
 		claim.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		if i, ok := index[itemID]; ok {
-			items[i].Claims = append(items[i].Claims, claim)
+			if includeHolders {
+				items[i].Claims = append(items[i].Claims, claim)
+			}
 			items[i].FilledCount++
 		}
 	}

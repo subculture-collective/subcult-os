@@ -47,9 +47,11 @@ export function OpenShiftsPanel({ shifts, loading, error, pendingId, notices, on
 						<p className={`mt-3 ${publicMutedTextClass}`}>{formatShiftTime(shift.startsAt)} – {formatShiftTime(shift.endsAt)}</p>
 						{shift.participantRequirements ? <div className="mt-3 rounded-xl border border-status-info/20 bg-status-surface-info p-3 text-sm leading-6 text-status-info"><p className="font-bold">Requirements</p><p className="mt-1 whitespace-pre-wrap">{shift.participantRequirements}</p></div> : null}
 						<p className={`mt-3 ${publicMutedTextClass}`}>
-							{action === 'contact-organizer'
-								? `The release window closed ${formatShiftTime(shift.releaseDeadline)}. Only the organizer can change this place now.`
-								: `You can release a claimed place until ${formatShiftTime(shift.releaseDeadline)}.`}
+							{action === 'organizer-managed'
+								? 'Assigned by the organizer; contact them to change it.'
+								: action === 'contact-organizer'
+									? `The release window closed ${formatShiftTime(shift.releaseDeadline)}. Only the organizer can change this place now.`
+									: `You can release a claimed place until ${formatShiftTime(shift.releaseDeadline)}.`}
 						</p>
 						{notice ? <div className="mt-3"><Notice tone={notice.tone}>{notice.text}</Notice></div> : null}
 						<div className="mt-4 flex flex-wrap gap-3">

@@ -248,7 +248,7 @@ const lifecycleNoticeRecipientsSQL = `with candidates as (
  select lower(btrim(p.email)),'crew_person',p.id
  from event_staffing_items s join people p on p.id=s.assigned_person_id
  join workspace_members wm on wm.person_id=p.id and wm.workspace_id=$2
- where s.event_id=$1 and s.status='assigned' and 'assigned_crew'=any($3::text[])
+ where s.event_id=$1 and s.status in ('open','assigned') and 'assigned_crew'=any($3::text[])
    and wm.removed_at is null and wm.revoked_at is null
    and (wm.expires_at is null or wm.expires_at>clock_timestamp())
  union all
@@ -262,7 +262,7 @@ const lifecycleNoticeRecipientsSQL = `with candidates as (
  union all
  select lower(btrim(ap.applicant_email)),'crew_application',ap.id
  from event_staffing_items s join event_role_applications ap on ap.id=s.assigned_application_id and ap.event_id=s.event_id
- where s.event_id=$1 and s.status='assigned' and ap.status in ('accepted','confirmed')
+ where s.event_id=$1 and s.status in ('open','assigned') and ap.status in ('accepted','confirmed')
    and 'assigned_crew'=any($3::text[])
 ), recipients as (select distinct on (email) email,source_type,source_id from candidates order by email,source_type,source_id)
 select r.email,r.source_type,r.source_id,exists(select 1 from email_suppressions es where es.recipient_email=r.email)

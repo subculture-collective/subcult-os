@@ -1,9 +1,10 @@
 import type { ParticipantOpenShiftDTO } from '../../domain';
 
-export type OpenShiftAction = 'claim' | 'full' | 'release' | 'contact-organizer';
+export type OpenShiftAction = 'claim' | 'full' | 'release' | 'contact-organizer' | 'organizer-managed';
 
 /** The one action a participant can take on a shift right now. */
 export function openShiftAction(shift: ParticipantOpenShiftDTO): OpenShiftAction {
+	if (shift.claimed && shift.organizerManaged) return 'organizer-managed';
 	if (shift.claimed) return shift.canRelease ? 'release' : 'contact-organizer';
 	return shift.remainingPlaces > 0 ? 'claim' : 'full';
 }

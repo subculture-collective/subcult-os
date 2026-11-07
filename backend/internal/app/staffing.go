@@ -105,7 +105,8 @@ func (a *App) handleListEventStaffing(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not load event")
 		return
 	}
-	if _, _, ok := a.requireWorkspaceRole(r, event.WorkspaceID, "owner", "member"); !ok {
+	_, role, ok := a.requireWorkspaceRole(r, event.WorkspaceID, "owner", "member")
+	if !ok {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -148,7 +149,8 @@ func (a *App) handleListEventStaffing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows.Close()
-	if err := attachStaffingClaims(r.Context(), a.db, event.ID, items); err != nil {
+	// Only owners manage staffing, so only they see who holds each place.
+	if err := attachStaffingClaims(r.Context(), a.db, event.ID, items, role == roleOwner); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load staffing")
 		return
 	}
@@ -527,6 +529,8 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 			where wm.workspace_id = $1
 			  and wm.person_id = $2
 			  and wm.removed_at is null
+			  and wm.revoked_at is null
+			  and (wm.expires_at is null or wm.expires_at > now())
 		`, workspaceID, *requestedPersonID).Scan(&assigneeName, &assignmentRecipientEmail); err != nil {
 			writeError(w, http.StatusBadRequest, "assignedPersonId must be an active workspace member")
 			return
@@ -650,7 +654,7 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		items := []eventStaffingItemDTO{eventStaffingItemDTOFromRow(current)}
-		if err := attachStaffingClaims(r.Context(), a.db, lockedEventID, items); err != nil {
+		if err := attachStaffingClaims(r.Context(), a.db, lockedEventID, items, true); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not load staffing item")
 			return
 		}
@@ -661,15 +665,37 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, "event is closed")
 		return
 	}
+	// Cancelling a shift ends its claimed places (below), so they no longer
+	// count against its capacity and a reopened shift starts without them.
+	cancelling := newRow.Status == "cancelled" && current.Status != "cancelled"
+	if cancelling {
+		filledNew -= claimCount
+	}
 	if filledNew > newRow.Capacity && (filledNew > filledOld || newRow.Capacity < current.Capacity) {
 		writeError(w, http.StatusConflict, "shift capacity reached")
 		return
 	}
-	if requestedPersonID != nil && assignmentChanged {
+	// The single assignee is a person directly or through an application bound
+	// to their account; either way they cannot hold a second place here or an
+	// overlapping one elsewhere on the event.
+	newHolderPersonID := ""
+	if newRow.AssignedPersonID.Valid {
+		newHolderPersonID = newRow.AssignedPersonID.String
+	} else if newRow.AssignedApplicationID.Valid {
+		var applicantPersonID sql.NullString
+		if err := tx.QueryRow(r.Context(), `
+			select applicant_person_id from event_role_applications where id = $1
+		`, newRow.AssignedApplicationID.String).Scan(&applicantPersonID); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not check assignments")
+			return
+		}
+		newHolderPersonID = applicantPersonID.String
+	}
+	if assignmentChanged && newHolderPersonID != "" {
 		var claimHeld bool
 		if err := tx.QueryRow(r.Context(), `
 			select exists (select 1 from event_staffing_claims where staffing_item_id = $1 and person_id = $2 and status = 'active')
-		`, current.ID, *requestedPersonID).Scan(&claimHeld); err != nil {
+		`, current.ID, newHolderPersonID).Scan(&claimHeld); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not check assignments")
 			return
 		}
@@ -678,7 +704,7 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if newRow.StartsAt.Valid && newRow.EndsAt.Valid {
-			overlaps, err := staffingPersonOverlaps(r.Context(), tx, lockedEventID, current.ID, *requestedPersonID, newRow.StartsAt.Time, newRow.EndsAt.Time)
+			overlaps, err := staffingPersonOverlaps(r.Context(), tx, lockedEventID, current.ID, newHolderPersonID, newRow.StartsAt.Time, newRow.EndsAt.Time)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "could not check schedule")
 				return
@@ -687,6 +713,37 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 				writeError(w, http.StatusConflict, "person holds another overlapping shift for this event")
 				return
 			}
+		}
+	}
+	// Moving a shift, or reopening a completed or cancelled one, must not
+	// leave any current holder in two overlapping places. The refusal gives a
+	// count only, never who is affected.
+	timesChanged := !sameNullTime(current.StartsAt, newRow.StartsAt) || !sameNullTime(current.EndsAt, newRow.EndsAt)
+	reopened := !staffingStatusAccepting(current.Status) && staffingStatusAccepting(newRow.Status)
+	if (timesChanged || reopened) && staffingStatusAccepting(newRow.Status) && newRow.StartsAt.Valid && newRow.EndsAt.Valid {
+		holders, err := staffingHolderPersonIDs(r.Context(), tx, current.ID, newHolderPersonID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not check schedule")
+			return
+		}
+		conflicts := 0
+		for _, holderID := range holders {
+			overlaps, err := staffingPersonOverlaps(r.Context(), tx, lockedEventID, current.ID, holderID, newRow.StartsAt.Time, newRow.EndsAt.Time)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "could not check schedule")
+				return
+			}
+			if overlaps {
+				conflicts++
+			}
+		}
+		if conflicts > 0 {
+			noun := "place holders hold"
+			if conflicts == 1 {
+				noun = "place holder holds"
+			}
+			writeError(w, http.StatusConflict, fmt.Sprintf("%d %s another overlapping shift for this event; change their places first", conflicts, noun))
+			return
 		}
 	}
 	if newRow.ClaimsOpen && (newRow.Kind != "shift" || !newRow.StartsAt.Valid || !newRow.EndsAt.Valid || len(nextRoleIDs) == 0) {
@@ -747,10 +804,20 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if _, err := tx.Exec(r.Context(), `
-			insert into event_staffing_claim_roles (staffing_item_id, role_id)
-			select $1, unnest($2::uuid[])
-		`, current.ID, nextRoleIDs); err != nil {
+			insert into event_staffing_claim_roles (staffing_item_id, event_id, role_id)
+			select $1, $3, unnest($2::uuid[])
+		`, current.ID, nextRoleIDs, lockedEventID); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not update eligible roles")
+			return
+		}
+	}
+
+	txCtx := context.WithValue(r.Context(), txContextKey{}, tx)
+	endedClaimIDs := []string{}
+	if cancelling {
+		endedClaimIDs, err = endStaffingClaimsForCancelledShift(txCtx, a, tx, actorID, lockedEventID, current.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not end claimed places")
 			return
 		}
 	}
@@ -761,7 +828,6 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	txCtx := context.WithValue(r.Context(), txContextKey{}, tx)
 	if assignmentChanged && updated.Status == "assigned" {
 		recipientEmail := normalizeEmail(assignmentRecipientEmail)
 		if recipientEmail != "" {
@@ -792,6 +858,9 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 		"assignedPersonId":      nullableString(updated.AssignedPersonID),
 		"assignedApplicationId": nullableString(updated.AssignedApplicationID),
 	}
+	if len(endedClaimIDs) > 0 {
+		auditMetadata["endedClaimCount"] = len(endedClaimIDs)
+	}
 	if policyChanged {
 		auditMetadata["capacity"] = updated.Capacity
 		auditMetadata["claimsOpen"] = updated.ClaimsOpen
@@ -803,7 +872,7 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	items := []eventStaffingItemDTO{eventStaffingItemDTOFromRow(updated)}
-	if err := attachStaffingClaims(r.Context(), tx, lockedEventID, items); err != nil {
+	if err := attachStaffingClaims(r.Context(), tx, lockedEventID, items, true); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load staffing item")
 		return
 	}
@@ -813,6 +882,79 @@ func (a *App) handleUpdateEventStaffing(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, items[0])
+}
+
+func sameNullTime(left, right sql.NullTime) bool {
+	return left.Valid == right.Valid && (!left.Valid || left.Time.Equal(right.Time))
+}
+
+func staffingStatusAccepting(status string) bool {
+	return status == "open" || status == "assigned"
+}
+
+// staffingHolderPersonIDs lists everyone holding a place on the item: active
+// claim holders plus legacyHolderID, the single assignee, when set.
+func staffingHolderPersonIDs(ctx context.Context, tx pgx.Tx, itemID, legacyHolderID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		select person_id from event_staffing_claims where staffing_item_id = $1 and status = 'active' order by person_id
+	`, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	holders := make([]string, 0)
+	for rows.Next() {
+		var personID string
+		if err := rows.Scan(&personID); err != nil {
+			return nil, err
+		}
+		if personID != legacyHolderID {
+			holders = append(holders, personID)
+		}
+	}
+	if legacyHolderID != "" {
+		holders = append(holders, legacyHolderID)
+	}
+	return holders, rows.Err()
+}
+
+// endStaffingClaimsForCancelledShift ends every active claimed place on a
+// shift the organizer is cancelling, recorded as removed by that organizer
+// with one audit entry per place. The caller holds the event and item locks.
+func endStaffingClaimsForCancelledShift(txCtx context.Context, a *App, tx pgx.Tx, actorID, eventID, itemID string) ([]string, error) {
+	rows, err := tx.Query(txCtx, `
+		update event_staffing_claims
+		set status = 'removed', ended_at = now(), ended_by_person_id = $2
+		where staffing_item_id = $1
+		  and status = 'active'
+		returning id
+	`, itemID, actorID)
+	if err != nil {
+		return nil, err
+	}
+	ended := make([]string, 0)
+	for rows.Next() {
+		var claimID string
+		if err := rows.Scan(&claimID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ended = append(ended, claimID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, claimID := range ended {
+		if err := a.audit(txCtx, actorID, "staffing.claim_removed", "event_staffing_claim", claimID, map[string]any{
+			"eventId":        eventID,
+			"staffingItemId": itemID,
+			"reason":         "shift_cancelled",
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return ended, nil
 }
 
 func loadStaffingClaimRoleIDs(ctx context.Context, tx pgx.Tx, itemID string) ([]string, error) {

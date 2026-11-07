@@ -128,10 +128,23 @@ release after success returns the released state and frees nothing further.
 The item moves between `open` and `assigned` as places fill and free;
 completed and cancelled items keep their status.
 
+The single assignee is a person either directly (`assigned_person_id`) or
+through an assigned application bound to their account. Both count as that
+person, so they cannot claim, be added or be assigned a second place on the
+same shift.
+
 Overlap rule: a person cannot hold two places on the same event whose
 `[startsAt, endsAt)` windows overlap. Windows that only touch are allowed.
 Cancelled and untimed items never conflict. The rule applies to self-claims,
-organizer additions and organizer person assignments.
+organizer additions and organizer assignments, by person or by application.
+When an owner moves a held shift's start or end, or reopens a completed or
+cancelled shift, every current holder is checked again. A conflict returns 409
+with the number of affected holders, never their names.
+
+Cancelling a shift ends its claimed places. Each is recorded as removed by the
+cancelling owner, with a `staffing.claim_removed` audit entry whose reason is
+`shift_cancelled`. A reopened shift therefore starts without claimed places;
+only the single assignee, if any, stays.
 
 ### Organizer override
 
@@ -141,19 +154,29 @@ Owners can add a current workspace member to a place
 release cutoff. Capacity, duplicate and overlap rules still apply. An addition
 queues the existing `staffing.assignment` notification.
 
+Only owners manage staffing, so only owners receive the `claims` list (who
+holds each place) in staffing responses. Other workspace roles get
+`filledCount` and an empty `claims` list. A holder is named by display name,
+or "Member" when they have none; their email is never included.
+
 ### Participant routes and returned fields
 
 - `GET /api/me/open-shifts` lists claimable shifts for the person's eligible
   roles and every shift they currently claim.
 - `POST /api/me/open-shifts/{staffingID}/claim` and `.../release`.
 - `POST /api/me/open-shifts/{staffingID}/release-request` is the organizer
-  contact action after the cutoff. It queues a private notification to each
-  workspace owner, at most once per place and owner, and releases nothing.
-  The participant never receives an owner's address.
+  contact action after the cutoff. Before the cutoff it returns 409, since the
+  participant can release the place directly. It queues a private
+  notification to each workspace owner, at most once per place and owner, and
+  releases nothing. Repeat requests write no further notification or audit
+  row. The participant never receives an owner's address.
 
 An open shift returns only its ID, event ID and title, title, start and end,
 participant requirements, `remainingPlaces`, whether the viewer holds a place,
-whether they can still release it, and the release deadline. It never returns
+whether they can still release it, `organizerManaged`, and the release
+deadline. `organizerManaged` is true when the viewer's place is the single
+assignment; the portal then says "Assigned by the organizer; contact them to
+change it" and offers neither release nor a release request. It never returns
 who else holds a place, their contacts, operator notes, application data or
 finance data. A held place appears in the existing assignment list with status
 `assigned`, also while other places on the shift stay open. Responses use
@@ -161,10 +184,20 @@ finance data. A held place appears in the existing assignment list with status
 
 ### Not in this slice
 
-Reminders still go only to the legacy single assignee, and the event archive
-records only that assignee's name. Lifecycle-notice recipients include
-claimants. Recurring series and a separate volunteer platform remain out of
-scope.
+Reminders and lifecycle notices go to every holder of a place: the single
+assignee and each active claim holder who is still a current member, also
+while other places on the shift stay open. An item nobody holds reminds the
+owners that it is unstaffed. The event archive still records only the single
+assignee's name. Recurring series and a separate volunteer platform remain out
+of scope.
+
+Known limitation: a claimed place stays active, and keeps counting against
+capacity, after its holder's membership is removed, revoked or expires, or
+after their application is withdrawn or rejected. The holder can no longer
+release it, and reminders and notices skip them. An owner removes the place
+from the staffing panel. Ending these places automatically needs a hook in
+both membership routes plus a sweep for expiry, with lock ordering that does
+not deadlock against claims, so it is left for a later slice.
 
 ### Verification
 
@@ -175,6 +208,11 @@ waitlisted, unbound and wrong-role applications, draft and closed events,
 membership revocation, the overlap rule, release one microsecond before, at
 and after the cutoff, the release request, organizer override and capacity
 limits, portal privacy, claimants as lifecycle-notice recipients, and an upgrade from a version-30 database with a
-legacy assignee. Web render tests cover the claim, full, release, after-cutoff
+legacy assignee. `staffing_claims_review_integration_test.go` covers reminders
+and notices for holders of partly filled shifts, application-based
+assignments in duplicate and overlap checks, owner-only holder identities,
+the overlap recheck on a move or reopen, ending claims on cancellation, the
+`organizerManaged` flag, release requests before and after the cutoff, and the
+database refusing claim and eligible-role rows that mix events. Web render tests cover the claim, full, release, after-cutoff
 and pending states and the organizer panel. The repository has no browser
 journey harness, so no browser journey was run for this slice.

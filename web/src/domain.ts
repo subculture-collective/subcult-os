@@ -37,6 +37,8 @@ export interface ParticipantOpenShiftDTO {
   remainingPlaces: number;
   claimed: boolean;
   canRelease: boolean;
+  /** The place is the organizer's single assignment; only they can change it. */
+  organizerManaged: boolean;
   releaseDeadline: string;
 }
 

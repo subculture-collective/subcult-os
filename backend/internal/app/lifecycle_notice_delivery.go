@@ -35,11 +35,11 @@ func (a *App) lifecycleNoticeSendAllowed(ctx context.Context, outboxID, lease st
    join workspace_members wm on wm.person_id=p.id and wm.workspace_id=n.workspace_id
    where p.id=nr.source_id and lower(btrim(p.email))=nr.recipient_email and wm.removed_at is null
    and wm.revoked_at is null and (wm.expires_at is null or wm.expires_at>clock_timestamp())
-   and (exists(select 1 from event_staffing_items s where s.assigned_person_id=p.id and s.event_id=n.event_id and s.status='assigned')
+   and (exists(select 1 from event_staffing_items s where s.assigned_person_id=p.id and s.event_id=n.event_id and s.status in ('open','assigned'))
      or exists(select 1 from event_staffing_claims c join event_staffing_items s on s.id=c.staffing_item_id
        where c.person_id=p.id and c.event_id=n.event_id and c.status='active' and s.status in ('open','assigned')))))
  or (nr.source_type='crew_application' and exists(select 1 from event_role_applications ap
-   join event_staffing_items s on s.assigned_application_id=ap.id and s.event_id=n.event_id and s.status='assigned'
+   join event_staffing_items s on s.assigned_application_id=ap.id and s.event_id=n.event_id and s.status in ('open','assigned')
    where ap.id=nr.source_id and ap.event_id=n.event_id and lower(btrim(ap.applicant_email))=nr.recipient_email
    and ap.status in ('accepted','confirmed')))
  ))`, outboxID, lease).Scan(&allowed)

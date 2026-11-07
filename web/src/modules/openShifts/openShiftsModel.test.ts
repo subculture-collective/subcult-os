@@ -4,7 +4,7 @@ import { openShiftAction, remainingPlacesLabel, replaceOpenShift } from './openS
 
 const shift: ParticipantOpenShiftDTO = {
 	staffingItemId: 'shift-1', eventId: 'event-1', eventTitle: 'Night Market', title: 'Door', startsAt: '2026-07-01T18:00:00Z', endsAt: '2026-07-01T20:00:00Z',
-	participantRequirements: '', remainingPlaces: 2, claimed: false, canRelease: false, releaseDeadline: '2026-06-30T18:00:00Z',
+	participantRequirements: '', remainingPlaces: 2, claimed: false, canRelease: false, organizerManaged: false, releaseDeadline: '2026-06-30T18:00:00Z',
 };
 
 describe('open shift actions', () => {
@@ -15,6 +15,9 @@ describe('open shift actions', () => {
 	it('offers release before the cutoff and the organizer contact after it', () => {
 		expect(openShiftAction({ ...shift, claimed: true, canRelease: true, remainingPlaces: 0 })).toBe('release');
 		expect(openShiftAction({ ...shift, claimed: true, canRelease: false })).toBe('contact-organizer');
+	});
+	it('leaves an organizer assignment to the organizer', () => {
+		expect(openShiftAction({ ...shift, claimed: true, canRelease: false, organizerManaged: true })).toBe('organizer-managed');
 	});
 	it('labels remaining places as a count', () => {
 		expect(remainingPlacesLabel(0)).toBe('No places left');

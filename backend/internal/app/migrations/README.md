@@ -72,6 +72,8 @@ Version 31 adds open-shift self-claim. `event_staffing_items` gains
 place, stays closed to self-claim, and its existing assignee still occupies
 that place. `event_role_applications` gains a nullable `applicant_person_id`,
 null for every existing row. New tables `event_staffing_claim_roles` and
-`event_staffing_claims` start empty. A version-30 binary rejects this schema;
+`event_staffing_claims` start empty. `event_staffing_items` and
+`event_roles` gain `unique (id, event_id)` so composite foreign keys tie each
+claim and each eligible-role row to a shift and role of the same event. A version-30 binary rejects this schema;
 roll back from a pre-migration backup and do not discard claim rows that
 participants rely on. See `docs/development/participant-portal.md`.

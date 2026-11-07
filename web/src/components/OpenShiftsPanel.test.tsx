@@ -6,7 +6,7 @@ import { OpenShiftsPanel } from './OpenShiftsPanel';
 const base: ParticipantOpenShiftDTO = {
 	staffingItemId: 'shift-1', eventId: 'event-1', eventTitle: 'Night Market', title: 'Door rotation',
 	startsAt: '2026-07-01T18:00:00Z', endsAt: '2026-07-01T20:00:00Z', participantRequirements: 'Wear closed shoes.',
-	remainingPlaces: 2, claimed: false, canRelease: false, releaseDeadline: '2026-06-30T18:00:00Z',
+	remainingPlaces: 2, claimed: false, canRelease: false, organizerManaged: false, releaseDeadline: '2026-06-30T18:00:00Z',
 };
 
 function render(shifts: ParticipantOpenShiftDTO[] | null, extra: Partial<Parameters<typeof OpenShiftsPanel>[0]> = {}) {
@@ -47,6 +47,15 @@ describe('open shifts panel', () => {
 		expect(html).toContain('role="alert"');
 		expect(html).toContain('ask the organizer to release you');
 		expect(html).not.toContain('Release my place');
+	});
+
+	it('shows an organizer assignment without a release or release request', () => {
+		const html = render([{ ...base, claimed: true, canRelease: false, organizerManaged: true }]);
+		expect(html).toContain('Your place');
+		expect(html).toContain('Assigned by the organizer; contact them to change it.');
+		expect(html).not.toContain('Ask the organizer to release me');
+		expect(html).not.toContain('Release my place');
+		expect(html).not.toContain('<button');
 	});
 
 	it('blocks every action while one request is pending', () => {

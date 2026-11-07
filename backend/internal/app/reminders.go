@@ -90,6 +90,7 @@ type staffingReminderRow struct {
 	StartsAt              time.Time
 	AssignedPersonID      sql.NullString
 	AssignedApplicationID sql.NullString
+	HasClaims             bool
 }
 
 func (a *App) handleListWorkspaceReminders(w http.ResponseWriter, r *http.Request) {
@@ -266,9 +267,12 @@ func (a *App) runWorkspaceReminderSweep(ctx context.Context, workspaceID, actorI
 			}
 		}
 	}
+	// An item with nobody holding a place reminds the owners that it is
+	// unstaffed. An item with any holder (the single assignee or a claimed
+	// place) reminds its holders, even while other places are still open.
 	staffingRows, err := tx.Query(ctx, `
 		select esi.id as staffing_id, e.workspace_id, e.id as event_id, e.title as event_title, esi.title as staffing_title, esi.starts_at,
-		       esi.assigned_person_id, esi.assigned_application_id
+		       esi.assigned_person_id, esi.assigned_application_id, false as has_claims
 		from event_staffing_items esi
 		join events e on e.id = esi.event_id
 		where e.workspace_id = $1
@@ -276,17 +280,26 @@ func (a *App) runWorkspaceReminderSweep(ctx context.Context, workspaceID, actorI
 		  and esi.status = 'open'
 		  and esi.assigned_person_id is null
 		  and esi.assigned_application_id is null
+		  and not exists (select 1 from event_staffing_claims c where c.staffing_item_id = esi.id and c.status = 'active')
 		  and esi.starts_at is not null
 		  and esi.starts_at >= $2
 		  and esi.starts_at <= $3
 		union all
 		select esi.id as staffing_id, e.workspace_id, e.id as event_id, e.title as event_title, esi.title as staffing_title, esi.starts_at,
-		       esi.assigned_person_id, esi.assigned_application_id
+		       esi.assigned_person_id, esi.assigned_application_id,
+		       exists (select 1 from event_staffing_claims c where c.staffing_item_id = esi.id and c.status = 'active') as has_claims
 		from event_staffing_items esi
 		join events e on e.id = esi.event_id
 		where e.workspace_id = $1
 		  and e.status = 'published'
-		  and esi.status = 'assigned'
+		  and (
+			esi.status = 'assigned'
+			or (esi.status = 'open' and (
+				esi.assigned_person_id is not null
+				or esi.assigned_application_id is not null
+				or exists (select 1 from event_staffing_claims c where c.staffing_item_id = esi.id and c.status = 'active')
+			))
+		  )
 		  and esi.starts_at is not null
 		  and esi.starts_at >= $2
 		  and esi.starts_at <= $3
@@ -299,7 +312,7 @@ func (a *App) runWorkspaceReminderSweep(ctx context.Context, workspaceID, actorI
 
 	for staffingRows.Next() {
 		var row staffingReminderRow
-		if err := staffingRows.Scan(&row.ID, &row.WorkspaceID, &row.EventID, &row.EventTitle, &row.Title, &row.StartsAt, &row.AssignedPersonID, &row.AssignedApplicationID); err != nil {
+		if err := staffingRows.Scan(&row.ID, &row.WorkspaceID, &row.EventID, &row.EventTitle, &row.Title, &row.StartsAt, &row.AssignedPersonID, &row.AssignedApplicationID, &row.HasClaims); err != nil {
 			return reminderSweepResult{}, err
 		}
 		staffingReminderRows = append(staffingReminderRows, row)
@@ -538,9 +551,29 @@ func (a *App) workspaceOwnerRecipients(ctx context.Context, tx pgx.Tx, workspace
 	return recipients, nil
 }
 
+// staffingReminderRecipients returns the holders of an item's places: the
+// single assignee (a current member, or an accepted application) plus every
+// active claim holder who is still a current member. An item nobody holds
+// reminds the workspace owners instead.
 func (a *App) staffingReminderRecipients(ctx context.Context, tx pgx.Tx, row staffingReminderRow) ([]string, error) {
 	if tx == nil {
 		return nil, nil
+	}
+	if !row.AssignedPersonID.Valid && !row.AssignedApplicationID.Valid && !row.HasClaims {
+		return a.workspaceOwnerRecipients(ctx, tx, row.WorkspaceID)
+	}
+	recipients := make([]string, 0)
+	seen := map[string]struct{}{}
+	add := func(email string) {
+		normalized := normalizeEmail(email)
+		if normalized == "" {
+			return
+		}
+		if _, ok := seen[normalized]; ok {
+			return
+		}
+		seen[normalized] = struct{}{}
+		recipients = append(recipients, normalized)
 	}
 	if row.AssignedPersonID.Valid {
 		var email string
@@ -552,19 +585,11 @@ func (a *App) staffingReminderRecipients(ctx context.Context, tx pgx.Tx, row sta
 			  and wm.person_id = $2
 			  and wm.removed_at is null
 		`, row.WorkspaceID, row.AssignedPersonID.String).Scan(&email)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, nil
-			}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, err
 		}
-		normalized := normalizeEmail(email)
-		if normalized == "" {
-			return nil, nil
-		}
-		return []string{normalized}, nil
-	}
-	if row.AssignedApplicationID.Valid {
+		add(email)
+	} else if row.AssignedApplicationID.Valid {
 		var email string
 		err := tx.QueryRow(ctx, `
 			select applicant_email
@@ -573,19 +598,40 @@ func (a *App) staffingReminderRecipients(ctx context.Context, tx pgx.Tx, row sta
 			  and event_id = $2
 			  and status in ('accepted', 'confirmed')
 		`, row.AssignedApplicationID.String, row.EventID).Scan(&email)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, nil
-			}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, err
 		}
-		normalized := normalizeEmail(email)
-		if normalized == "" {
-			return nil, nil
-		}
-		return []string{normalized}, nil
+		add(email)
 	}
-	return a.workspaceOwnerRecipients(ctx, tx, row.WorkspaceID)
+	if row.HasClaims {
+		rows, err := tx.Query(ctx, `
+			select p.email
+			from event_staffing_claims c
+			join people p on p.id = c.person_id
+			join workspace_members wm on wm.person_id = c.person_id and wm.workspace_id = $2
+			where c.staffing_item_id = $1
+			  and c.status = 'active'
+			  and wm.removed_at is null
+			  and wm.revoked_at is null
+			  and (wm.expires_at is null or wm.expires_at > now())
+			order by p.email
+		`, row.ID, row.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var email string
+			if err := rows.Scan(&email); err != nil {
+				return nil, err
+			}
+			add(email)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return recipients, nil
 }
 
 func commitmentReminderCopy(title string, dueAt time.Time) (string, string, string) {
@@ -605,7 +651,7 @@ func staffingReminderCopy(eventTitle, staffingTitle string, startsAt time.Time) 
 }
 
 func (r staffingReminderRow) Status() string {
-	if r.AssignedPersonID.Valid || r.AssignedApplicationID.Valid {
+	if r.AssignedPersonID.Valid || r.AssignedApplicationID.Valid || r.HasClaims {
 		return "assigned"
 	}
 	return "open"
