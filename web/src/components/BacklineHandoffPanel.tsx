@@ -1,5 +1,5 @@
 import type { BacklinePreviewDTO, ChannelHandoffDTO } from '../domain';
-import { blockerMessage, canRetryHandoff, handoffStateLabel, handoffTone, mentionPolicyLabel } from '../modules/announcements/backlineHandoff';
+import { blockerMessage, canRetryHandoff, handoffRetryHint, handoffStateLabel, handoffTone, mentionPolicyLabel } from '../modules/announcements/backlineHandoff';
 import { Button } from '../ui/Button';
 import { Notice } from '../ui/Notice';
 
@@ -49,7 +49,7 @@ export function BacklineHandoffPanel({ preview, handoffs, busy, onHandoff, onRet
           <Notice tone={handoffTone(handoff)}>{handoffStateLabel(handoff)}{handoff.lastError ? ` (${handoff.lastError})` : ''}</Notice>
           {handoff.deliveryOutcome && <p>Channel delivery receipt: {handoff.deliveryOutcome}</p>}
           {canRetryHandoff(handoff) && <>
-            <p className="text-fg-secondary">Check the Backline channel before retrying. A retry reuses the same occurrence key, so Backline posts it at most once.</p>
+            <p className="text-fg-secondary">{handoffRetryHint(handoff)}</p>
             <Button variant="secondary" busy={busy} onClick={() => onRetry(handoff)}>Retry with the same key</Button>
           </>}
         </li>)}

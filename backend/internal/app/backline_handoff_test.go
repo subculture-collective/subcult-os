@@ -165,8 +165,18 @@ func TestSendBacklineHandoffClassifiesReceiverResults(t *testing.T) {
 			w.WriteHeader(http.StatusConflict)
 			_, _ = w.Write([]byte(`{"error":"binding_revoked"}`))
 		}},
-		{"unexplained rejection", handoffStatusRejected, "receiver_http_403", func(w http.ResponseWriter, _ *http.Request) {
+		{"contract rejection", handoffStatusRejected, "receiver_http_422", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+		}},
+		{"signature refused", handoffStatusFailed, "invalid_signature", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"invalid_signature"}`))
+		}},
+		{"access refused", handoffStatusFailed, "receiver_http_403", func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
+		}},
+		{"request timeout", handoffStatusFailed, "receiver_http_408", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusRequestTimeout)
 		}},
 		{"not processed", handoffStatusPending, "receiver_http_503", func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)

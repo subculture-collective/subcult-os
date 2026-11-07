@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import { ApiError, api, postJSON } from '../api';
 import { BacklineHandoffPanel } from '../components/BacklineHandoffPanel';
 import type { AnnouncementDTO, BacklinePreviewDTO, ChannelBindingDTO, ChannelHandoffDTO } from '../domain';
+import { latestRequest } from '../modules/announcements/backlineHandoff';
 import { Button } from '../ui/Button';
 import { Notice } from '../ui/Notice';
 
@@ -13,6 +14,8 @@ function message(error: unknown) {
 // channel and hand an approved announcement to it (issue #221).
 export function AnnouncementChannelsView({ workspaceId }: { workspaceId: string }) {
   const generation = useRef(0);
+  const selection = useRef(latestRequest());
+  const selectedRef = useRef('');
   const [announcements, setAnnouncements] = useState<AnnouncementDTO[]>([]);
   const [bindings, setBindings] = useState<ChannelBindingDTO[]>([]);
   const [selectedId, setSelectedId] = useState('');
@@ -46,21 +49,25 @@ export function AnnouncementChannelsView({ workspaceId }: { workspaceId: string 
     } catch (error) { if (current === generation.current) fail(error); }
   }
 
+  // loadSelected ignores a response for an announcement that is no longer
+  // the latest selection, so the panel and its Hand off button never show
+  // one announcement while another is selected.
   async function loadSelected(id: string) {
     const current = generation.current;
+    const token = selection.current.begin();
     if (!id) { setPreview(null); setHandoffs([]); return; }
     try {
       const [nextPreview, announcement] = await Promise.all([
         api<BacklinePreviewDTO>(`${base}/announcements/${id}/backline-preview`),
         api<AnnouncementDTO>(`${base}/announcements/${id}`),
       ]);
-      if (current !== generation.current) return;
+      if (current !== generation.current || !selection.current.isCurrent(token)) return;
       setPreview(nextPreview); setHandoffs(announcement.channelHandoffs);
-    } catch (error) { if (current === generation.current) fail(error); }
+    } catch (error) { if (current === generation.current && selection.current.isCurrent(token)) fail(error); }
   }
 
   useEffect(() => { setNotice(null); void loadWorkspace(); return () => { generation.current += 1; }; }, [workspaceId]);
-  useEffect(() => { void loadSelected(selectedId); }, [selectedId]);
+  useEffect(() => { selectedRef.current = selectedId; setPreview(null); setHandoffs([]); void loadSelected(selectedId); }, [selectedId]);
 
   async function run(action: () => Promise<unknown>, done: string) {
     if (busy) return false;
@@ -69,7 +76,7 @@ export function AnnouncementChannelsView({ workspaceId }: { workspaceId: string 
       await action();
       setNotice(done);
       await loadWorkspace();
-      await loadSelected(selectedId);
+      await loadSelected(selectedRef.current);
       return true;
     } catch (error) { fail(error); return false; }
     finally { setBusy(false); }

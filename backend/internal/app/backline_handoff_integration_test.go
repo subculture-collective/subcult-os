@@ -129,15 +129,57 @@ func (fx backlineHandoffFixture) handoff(t *testing.T, announcementID string) ma
 func (fx backlineHandoffFixture) postReceipt(t *testing.T, secret string, receipt backlineReceipt, want int) {
 	t.Helper()
 	body, _ := json.Marshal(receipt)
-	timestamp := time.Now().Unix()
+	fx.postSignedReceipt(t, body, secret, backlineSignatureScopeReceipt, time.Now().Unix(), want)
+}
+
+func (fx backlineHandoffFixture) postSignedReceipt(t *testing.T, body []byte, secret, scope string, timestamp int64, want int) {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/backline/receipts", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(backlineTimestampHeader, strconv.FormatInt(timestamp, 10))
-	req.Header.Set(backlineSignatureHeader, backlineSignature(secret, backlineSignatureScopeReceipt, timestamp, body))
+	req.Header.Set(backlineSignatureHeader, backlineSignature(secret, scope, timestamp, body))
 	rec := httptest.NewRecorder()
 	fx.app.Handler().ServeHTTP(rec, req)
 	if rec.Code != want {
 		t.Fatalf("receipt status %d, want %d: %s", rec.Code, want, rec.Body.String())
+	}
+}
+
+// uncertainThenRetried leaves a handoff that Backline stored but whose
+// acknowledgement was lost, then retried by an operator: pending again, with
+// receiver_may_hold set.
+func (fx backlineHandoffFixture) uncertainThenRetried(t *testing.T) (announcementID, handoffID string) {
+	t.Helper()
+	announcementID = fx.scheduledAnnouncement(t)
+	created := postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+announcementID+"/backline-handoff"), map[string]any{"bindingId": fx.bindingID}, http.StatusCreated)
+	handoffID = mustString(t, created.JSON, "id")
+	fx.receiver.failAfterProcessing = 1
+	if report := fx.runWorker(t); report.Uncertain != 1 {
+		t.Fatalf("a 500 after processing must be uncertain: %+v", report)
+	}
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+announcementID+"/channel-handoffs/"+handoffID+"/retry"), map[string]any{}, http.StatusOK)
+	if handoff := fx.handoff(t, announcementID); handoff["status"] != handoffStatusPending || handoff["operation"] != handoffOperationPublish {
+		t.Fatalf("retry must queue the publish again: %#v", handoff)
+	}
+	return announcementID, handoffID
+}
+
+// assertWithdrawnAtReceiver checks that the receiver got a same-key cancel
+// after the stored publish and holds the occurrence as cancelled.
+func (fx backlineHandoffFixture) assertWithdrawnAtReceiver(t *testing.T, announcementID string) {
+	t.Helper()
+	key := backlineOccurrenceKey(announcementID, fx.bindingID)
+	last := fx.receiver.requests[len(fx.receiver.requests)-1]
+	if last["operation"] != handoffOperationCancel || last["occurrenceKey"] != key || fx.receiver.states[key] != "cancelled" {
+		t.Fatalf("Backline still holds the occurrence: state=%q requests=%v", fx.receiver.states[key], fx.receiver.requests)
+	}
+	for _, request := range fx.receiver.requests[1:] {
+		if request["operation"] == handoffOperationPublish {
+			t.Fatalf("a withdrawn publish was sent again: %v", fx.receiver.requests)
+		}
+	}
+	if handoff := fx.handoff(t, announcementID); handoff["operation"] != handoffOperationCancel || handoff["status"] != handoffStatusAccepted || handoff["receiverStatus"] != "cancelled" {
+		t.Fatalf("unexpected cancel outcome: %#v", handoff)
 	}
 }
 
@@ -223,15 +265,106 @@ func TestBacklineHandoffReceiverRejectsBadSignature(t *testing.T) {
 	config := fx.app.config
 	config.BacklineHandoffSecret = "a-different-secret-than-the-receiver-holds"
 	report, err := RunBacklineHandoffs(t.Context(), config, fx.app.db, 10, fx.server.Client())
-	if err != nil || report.Rejected != 1 {
-		t.Fatalf("a badly signed handoff must be rejected: %+v %v", report, err)
+	if err != nil || report.Failed != 1 {
+		t.Fatalf("a badly signed handoff must be held as failed: %+v %v", report, err)
 	}
 	if fx.receiver.posts != 0 || len(fx.receiver.requests) != 0 {
 		t.Fatal("receiver processed an unauthenticated handoff")
 	}
-	if handoff := fx.handoff(t, id); handoff["status"] != handoffStatusRejected || handoff["lastError"] != "invalid_signature" {
-		t.Fatalf("rejection must be visible: %#v", handoff)
+	handoff := fx.handoff(t, id)
+	if handoff["status"] != handoffStatusFailed || handoff["lastError"] != "invalid_signature" {
+		t.Fatalf("the refusal must be visible: %#v", handoff)
 	}
+	if report := fx.runWorker(t); report.Claimed != 0 {
+		t.Fatalf("a refused handoff must wait for an operator: %+v", report)
+	}
+	// After the secret is fixed, an operator retry delivers it.
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+id+"/channel-handoffs/"+mustString(t, handoff, "id")+"/retry"), map[string]any{}, http.StatusOK)
+	if report := fx.runWorker(t); report.Accepted != 1 || fx.receiver.posts != 1 {
+		t.Fatalf("the retried handoff must be accepted once: %+v posts=%d", report, fx.receiver.posts)
+	}
+}
+
+// TestBacklineHandoffCancelAfterRetriedUncertainSendsCancel covers a cancel
+// that lands after an operator retried an uncertain publish but before the
+// worker resent it. Backline stored the first attempt, so a local
+// cancellation alone would let it post at deliverAt.
+func TestBacklineHandoffCancelAfterRetriedUncertainSendsCancel(t *testing.T) {
+	fx := newBacklineHandoffFixture(t)
+	id, _ := fx.uncertainThenRetried(t)
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+id+"/cancel"), map[string]any{}, http.StatusOK)
+	if handoff := fx.handoff(t, id); handoff["operation"] != handoffOperationCancel || handoff["status"] != handoffStatusPending {
+		t.Fatalf("a publish Backline may hold must become a cancel message: %#v", handoff)
+	}
+	if report := fx.runWorker(t); report.Accepted != 1 {
+		t.Fatalf("the cancel message must be acknowledged: %+v", report)
+	}
+	fx.assertWithdrawnAtReceiver(t, id)
+}
+
+func TestBacklineRevocationAfterRetriedUncertainSendsCancel(t *testing.T) {
+	fx := newBacklineHandoffFixture(t)
+	id, _ := fx.uncertainThenRetried(t)
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/backline-bindings/"+fx.bindingID+"/revoke"), map[string]any{}, http.StatusOK)
+	if report := fx.runWorker(t); report.Accepted != 1 {
+		t.Fatalf("the cancel message must be acknowledged: %+v", report)
+	}
+	fx.assertWithdrawnAtReceiver(t, id)
+}
+
+// TestBacklineHandoffWorkerWithdrawsHeldPublishWithCancel covers the
+// worker's own recheck: a claimed publish whose announcement was withdrawn
+// behind the API (here by direct SQL) is turned into a cancel when Backline
+// may hold an earlier attempt.
+func TestBacklineHandoffWorkerWithdrawsHeldPublishWithCancel(t *testing.T) {
+	fx := newBacklineHandoffFixture(t)
+	id, _ := fx.uncertainThenRetried(t)
+	if _, err := fx.app.db.Exec(t.Context(), `update announcements set status = 'cancelled' where id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if report := fx.runWorker(t); report.Retrying != 1 || report.Accepted != 1 {
+		t.Fatalf("the worker must convert the publish and send a cancel: %+v", report)
+	}
+	fx.assertWithdrawnAtReceiver(t, id)
+}
+
+// TestBacklineHandoffFinalReceiptResolvesUncertain: a delivered receipt
+// proves Backline holds the occurrence, so the held uncertain state resolves
+// and no retry is offered.
+func TestBacklineHandoffFinalReceiptResolvesUncertain(t *testing.T) {
+	fx := newBacklineHandoffFixture(t)
+	id := fx.scheduledAnnouncement(t)
+	created := postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+id+"/backline-handoff"), map[string]any{"bindingId": fx.bindingID}, http.StatusCreated)
+	fx.receiver.failAfterProcessing = 1
+	fx.runWorker(t)
+	receipt := backlineReceipt{Version: 1, Kind: backlineReceiptKind, OccurrenceKey: backlineOccurrenceKey(id, fx.bindingID),
+		ContentRevision: mustString(t, created.JSON, "contentRevision"), Outcome: "delivered", ReceiverReference: "discord-message"}
+	fx.postReceipt(t, syntheticBacklineSecret, receipt, http.StatusOK)
+	handoff := fx.handoff(t, id)
+	if handoff["status"] != handoffStatusAccepted || handoff["lastError"] != nil || handoff["acknowledgedAt"] == nil || handoff["deliveryOutcome"] != "delivered" {
+		t.Fatalf("a delivered receipt must resolve the uncertain transport state: %#v", handoff)
+	}
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+id+"/channel-handoffs/"+mustString(t, handoff, "id")+"/retry"), map[string]any{}, http.StatusConflict)
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+id+"/schedule"), map[string]any{"scheduledFor": time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)}, http.StatusConflict)
+}
+
+func TestBacklineReceiptRejectsStaleAndCrossScopeSignatures(t *testing.T) {
+	fx := newBacklineHandoffFixture(t)
+	id := fx.scheduledAnnouncement(t)
+	created := postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+id+"/backline-handoff"), map[string]any{"bindingId": fx.bindingID}, http.StatusCreated)
+	body, _ := json.Marshal(backlineReceipt{Version: 1, Kind: backlineReceiptKind, OccurrenceKey: backlineOccurrenceKey(id, fx.bindingID),
+		ContentRevision: mustString(t, created.JSON, "contentRevision"), Outcome: "delivered"})
+	stale := time.Now().Add(-backlineReplayWindow - time.Minute).Unix()
+	fx.postSignedReceipt(t, body, syntheticBacklineSecret, backlineSignatureScopeReceipt, stale, http.StatusUnauthorized)
+	future := time.Now().Add(backlineReplayWindow + time.Minute).Unix()
+	fx.postSignedReceipt(t, body, syntheticBacklineSecret, backlineSignatureScopeReceipt, future, http.StatusUnauthorized)
+	// A body signed for the handoff scope, as a captured handoff request
+	// would be, is not a valid receipt.
+	fx.postSignedReceipt(t, body, syntheticBacklineSecret, backlineSignatureScopeHandoff, time.Now().Unix(), http.StatusUnauthorized)
+	if handoff := fx.handoff(t, id); handoff["deliveryOutcome"] != nil {
+		t.Fatalf("a refused receipt must record nothing: %#v", handoff)
+	}
+	fx.postSignedReceipt(t, body, syntheticBacklineSecret, backlineSignatureScopeReceipt, time.Now().Unix(), http.StatusOK)
 }
 
 // TestBacklineHandoffUncertainRetryDeliversOnce covers a receiver that
@@ -394,6 +527,81 @@ func TestBacklineHandoffRescheduleFollowsUnsentAndBlocksSent(t *testing.T) {
 	}
 	fx.runWorker(t)
 	postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+id+"/schedule"), map[string]any{"scheduledFor": later.Add(time.Hour).Format(time.RFC3339)}, http.StatusConflict)
+}
+
+// A pending publish that Backline may already hold (retried after an
+// uncertain attempt) keeps its time: the receiver deduplicates on the key and
+// would ignore a new deliverAt.
+func TestBacklineHandoffRescheduleRefusesRetriedUncertain(t *testing.T) {
+	fx := newBacklineHandoffFixture(t)
+	id, _ := fx.uncertainThenRetried(t)
+	before := fx.handoff(t, id)["deliverAt"]
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+id+"/schedule"), map[string]any{"scheduledFor": time.Now().Add(5 * time.Hour).UTC().Format(time.RFC3339)}, http.StatusConflict)
+	if after := fx.handoff(t, id)["deliverAt"]; after != before {
+		t.Fatalf("a refused reschedule must not move the handoff: %v -> %v", before, after)
+	}
+}
+
+// TestBacklineHandoffRescheduleWaitsForConcurrentClaim holds the handoff row
+// the way the worker's claim does, lets the reschedule start, then commits
+// the claim. The reschedule must see the claim and refuse, rather than
+// report success while Backline receives the old deliverAt.
+func TestBacklineHandoffRescheduleWaitsForConcurrentClaim(t *testing.T) {
+	fx := newBacklineHandoffFixture(t)
+	id := fx.scheduledAnnouncement(t)
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+id+"/backline-handoff"), map[string]any{"bindingId": fx.bindingID}, http.StatusCreated)
+	claim, err := fx.app.db.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = claim.Rollback(t.Context()) }()
+	if _, err := claim.Exec(t.Context(), `update announcement_channel_handoffs set status = 'sending', attempt_count = 1, lease_expires_at = now() + interval '2 minutes' where announcement_id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"scheduledFor": time.Now().Add(4 * time.Hour).UTC().Format(time.RFC3339)})
+	done := make(chan int, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, fx.path("/announcements/"+id+"/schedule"), bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(fx.ownerCookie)
+		rec := httptest.NewRecorder()
+		fx.app.Handler().ServeHTTP(rec, req)
+		done <- rec.Code
+	}()
+	// Wait until the reschedule is blocked on the claimed row's lock.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting bool
+		if err := fx.app.db.QueryRow(t.Context(), `select exists(select 1 from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid()
+			  and wait_event_type = 'Lock' and query like '%announcement_channel_handoffs%')`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case code := <-done:
+			t.Fatalf("the reschedule finished with %d without waiting for the claimed row", code)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the reschedule never waited on the claimed handoff")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := claim.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if code := <-done; code != http.StatusConflict {
+		t.Fatalf("a reschedule racing the worker's claim must be refused, got %d", code)
+	}
+	var announcementTime, deliverAt time.Time
+	if err := fx.app.db.QueryRow(t.Context(), `select a.scheduled_for, h.deliver_at from announcements a join announcement_channel_handoffs h on h.announcement_id = a.id where a.id = $1`, id).Scan(&announcementTime, &deliverAt); err != nil {
+		t.Fatal(err)
+	}
+	if !announcementTime.Equal(deliverAt) {
+		t.Fatalf("the refused reschedule must leave the announcement and handoff times equal: %v vs %v", announcementTime, deliverAt)
+	}
 }
 
 func TestBacklineHandoffBoundedRetriesThenFail(t *testing.T) {

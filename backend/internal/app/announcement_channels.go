@@ -296,6 +296,38 @@ func (a *App) handleRevokeChannelBinding(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, dto)
 }
 
+// lockAnnouncementHandoffsForReschedule locks every handoff of the
+// announcement and reports whether Backline may already hold one (any row
+// other than an unsent publish, or one marked receiver_may_hold) and how many
+// unsent pending publishes should follow the new time.
+func lockAnnouncementHandoffsForReschedule(ctx context.Context, tx pgx.Tx, announcementID string) (sent bool, pending int, err error) {
+	rows, err := tx.Query(ctx, `
+		select operation, status, receiver_may_hold from announcement_channel_handoffs
+		where announcement_id = $1 for update
+	`, announcementID)
+	if err != nil {
+		return false, 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var operation, status string
+		var mayHold bool
+		if err := rows.Scan(&operation, &status, &mayHold); err != nil {
+			return false, 0, err
+		}
+		switch {
+		case mayHold || operation != handoffOperationPublish:
+			sent = true
+		case status == handoffStatusPending:
+			pending++
+		case status == handoffStatusCancelled || status == handoffStatusRejected || status == handoffStatusExpired:
+		default:
+			sent = true
+		}
+	}
+	return sent, pending, rows.Err()
+}
+
 func announcementApproved(status string) bool {
 	return status == announcementStatusScheduled || status == announcementStatusDispatching || status == announcementStatusDispatched
 }
@@ -632,11 +664,23 @@ func (a *App) handleBacklineReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Only an uncertain outcome may later resolve; delivered, failed and
-	// cancelled are final.
+	// cancelled are final. A final receipt proves Backline holds the
+	// occurrence, so an uncertain or failed transport state resolves to
+	// accepted and is no longer offered for retry. For a cancel message the
+	// receipt also says whether the post went out first.
 	result, err := a.db.Exec(r.Context(), `
 		update announcement_channel_handoffs
 		set delivery_outcome = $2, delivery_outcome_at = now(),
-		    receiver_reference = coalesce(nullif($3, ''), receiver_reference), updated_at = now()
+		    receiver_reference = coalesce(nullif($3, ''), receiver_reference),
+		    receiver_may_hold = true,
+		    receiver_status = case
+		      when $2 <> 'uncertain' and status in ('uncertain', 'failed') and operation = 'cancel'
+		        then case when $2 = 'delivered' then 'already_delivered' else 'cancelled' end
+		      else receiver_status end,
+		    last_error = case when $2 <> 'uncertain' and status in ('uncertain', 'failed') then null else last_error end,
+		    acknowledged_at = case when $2 <> 'uncertain' and status in ('uncertain', 'failed') then coalesce(acknowledged_at, now()) else acknowledged_at end,
+		    status = case when $2 <> 'uncertain' and status in ('uncertain', 'failed') then 'accepted' else status end,
+		    updated_at = now()
 		where occurrence_key = $1 and (delivery_outcome is null or delivery_outcome = 'uncertain')
 	`, receipt.OccurrenceKey, receipt.Outcome, receipt.ReceiverReference)
 	if err != nil {

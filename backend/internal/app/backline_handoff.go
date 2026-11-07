@@ -194,7 +194,7 @@ func RunBacklineHandoffs(ctx context.Context, config Config, db *pgxpool.Pool, l
 	// A send whose worker vanished may or may not have reached the receiver.
 	if _, err := db.Exec(ctx, `
 		update announcement_channel_handoffs
-		set status = $1, last_error = 'lease_expired', lease_expires_at = null, updated_at = now()
+		set status = $1, last_error = 'lease_expired', lease_expires_at = null, receiver_may_hold = true, updated_at = now()
 		where status = $2 and lease_expires_at < now()
 	`, handoffStatusUncertain, handoffStatusSending); err != nil {
 		return report, errors.New("backline lease sweep failed")
@@ -242,7 +242,7 @@ type claimedHandoff struct {
 	body, announcementStatus                               string
 	deliverAt, expiresAt                                   time.Time
 	attempt                                                int
-	bindingRevoked                                         bool
+	bindingRevoked, receiverMayHold                        bool
 }
 
 func deliverOneBacklineHandoff(ctx context.Context, config Config, db *pgxpool.Pool, client *http.Client) (bool, string, error) {
@@ -262,11 +262,11 @@ func deliverOneBacklineHandoff(ctx context.Context, config Config, db *pgxpool.P
 		where h.id = candidate.id and a.id = h.announcement_id and b.id = h.binding_id
 		returning h.id::text, h.operation, h.occurrence_key, h.content_revision, h.deliver_at, h.expires_at,
 		          h.attempt_count, b.id::text, b.external_server_id, b.external_channel_id, b.mention_policy,
-		          b.revoked_at is not null, a.subject, a.body, a.status
+		          b.revoked_at is not null, h.receiver_may_hold, a.subject, a.body, a.status
 	`, handoffStatusPending, handoffStatusSending, backlineLease.Seconds()).Scan(
 		&h.id, &h.operation, &h.occurrenceKey, &h.contentRevision, &h.deliverAt, &h.expiresAt,
 		&h.attempt, &h.bindingID, &h.serverID, &h.channelID, &h.mentionPolicy,
-		&h.bindingRevoked, &h.subject, &h.body, &h.announcementStatus)
+		&h.bindingRevoked, &h.receiverMayHold, &h.subject, &h.body, &h.announcementStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, "", nil
 	}
@@ -278,6 +278,11 @@ func deliverOneBacklineHandoff(ctx context.Context, config Config, db *pgxpool.P
 		// Defensive recheck: revocation and cancellation normally convert the
 		// row before a worker sees it.
 		if h.bindingRevoked || h.announcementStatus == announcementStatusCancelled || h.announcementStatus == announcementStatusDraft {
+			if h.receiverMayHold {
+				// An earlier attempt may have reached Backline, so only a
+				// cancel message with the same key can withdraw it.
+				return true, handoffStatusPending, convertClaimedHandoffToCancel(ctx, db, h)
+			}
 			return true, handoffStatusCancelled, recordHandoffOutcome(ctx, db, h, handoffStatusCancelled, "", "", "publish_withdrawn_before_send")
 		}
 		if announcementContentRevision(h.subject, h.body) != h.contentRevision {
@@ -342,13 +347,22 @@ func sendBacklineHandoff(ctx context.Context, config Config, client *http.Client
 	case resp.StatusCode >= 500:
 		return handoffStatusUncertain, "", "", "receiver_http_" + strconv.Itoa(resp.StatusCode)
 	case resp.StatusCode >= 300:
+		code := "receiver_http_" + strconv.Itoa(resp.StatusCode)
 		var rejected struct {
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(raw, &rejected) == nil && backlineReceiverCode.MatchString(rejected.Error) {
-			return handoffStatusRejected, "", "", rejected.Error
+			code = rejected.Error
 		}
-		return handoffStatusRejected, "", "", "receiver_http_" + strconv.Itoa(resp.StatusCode)
+		// 401/403 (signature, clock skew, secret rotation, permissions) and
+		// 408 say the receiver did not process the request, but resending
+		// unchanged would fail the same way. Hold them as failed so an
+		// organizer can retry after the configuration is fixed.
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusRequestTimeout:
+			return handoffStatusFailed, "", "", code
+		}
+		return handoffStatusRejected, "", "", code
 	}
 	if readErr != nil {
 		return handoffStatusUncertain, "", "", "receiver_ack_unreadable"
@@ -387,6 +401,7 @@ func recordHandoffOutcome(ctx context.Context, db *pgxpool.Pool, h claimedHandof
 	_, err := db.Exec(ctx, `
 		update announcement_channel_handoffs
 		set status = $4,
+		    receiver_may_hold = receiver_may_hold or $4 in ('accepted', 'uncertain'),
 		    receiver_status = coalesce(nullif($5, ''), receiver_status),
 		    receiver_reference = coalesce(nullif($6, ''), receiver_reference),
 		    last_error = nullif($7, ''),
@@ -402,14 +417,32 @@ func recordHandoffOutcome(ctx context.Context, db *pgxpool.Pool, h claimedHandof
 	return nil
 }
 
+// convertClaimedHandoffToCancel turns a claimed publish that was withdrawn
+// before this send into a queued cancel message, unless a concurrent
+// cancellation already changed the row.
+func convertClaimedHandoffToCancel(ctx context.Context, db *pgxpool.Pool, h claimedHandoff) error {
+	_, err := db.Exec(ctx, `
+		update announcement_channel_handoffs
+		set operation = $4, status = $5, attempt_count = 0, next_attempt_at = now(), last_error = null,
+		    lease_expires_at = null, cancel_requested_at = coalesce(cancel_requested_at, now()), updated_at = now()
+		where id = $1 and status = $2 and operation = $3 and attempt_count = $6
+	`, h.id, handoffStatusSending, h.operation, handoffOperationCancel, handoffStatusPending, h.attempt)
+	if err != nil {
+		return errors.New("backline handoff outcome write failed")
+	}
+	return nil
+}
+
 // requestHandoffCancellation converts the matched handoffs in one
 // transaction: a publish the receiver never saw is cancelled locally; one it
-// may have seen becomes a cancel message with the same occurrence key.
+// may have seen becomes a cancel message with the same occurrence key. A
+// pending publish counts as seen when receiver_may_hold is set, for example
+// after an operator retried an uncertain attempt.
 func requestHandoffCancellation(ctx context.Context, tx pgx.Tx, filter string, arg string) error {
 	if _, err := tx.Exec(ctx, `
 		update announcement_channel_handoffs
 		set status = $1, cancel_requested_at = coalesce(cancel_requested_at, now()), lease_expires_at = null, updated_at = now()
-		where `+filter+` = $3 and operation = $2 and status = 'pending'
+		where `+filter+` = $3 and operation = $2 and status = 'pending' and not receiver_may_hold
 	`, handoffStatusCancelled, handoffOperationPublish, arg); err != nil {
 		return err
 	}
@@ -417,7 +450,8 @@ func requestHandoffCancellation(ctx context.Context, tx pgx.Tx, filter string, a
 		update announcement_channel_handoffs
 		set operation = $1, status = 'pending', attempt_count = 0, next_attempt_at = now(), last_error = null,
 		    lease_expires_at = null, cancel_requested_at = coalesce(cancel_requested_at, now()), updated_at = now()
-		where `+filter+` = $3 and operation = $2 and status in ('sending', 'accepted', 'uncertain', 'failed')
+		where `+filter+` = $3 and operation = $2
+		  and (status in ('sending', 'accepted', 'uncertain', 'failed') or (status = 'pending' and receiver_may_hold))
 	`, handoffOperationCancel, handoffOperationPublish, arg)
 	return err
 }

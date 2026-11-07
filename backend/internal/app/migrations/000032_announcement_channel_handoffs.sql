@@ -31,6 +31,9 @@ create unique index announcement_channel_bindings_active_idx
 -- idempotency key the receiver deduplicates on; publish and cancel messages
 -- reuse it. status describes the current operation's transport outcome;
 -- delivery_outcome is the receiver's later channel-delivery receipt.
+-- receiver_may_hold is sticky: once any publish attempt was accepted, uncertain
+-- or lost with its lease, Backline may hold the occurrence, so withdrawing it
+-- needs a cancel message even if a later retry left the row pending.
 create table announcement_channel_handoffs (
   id uuid primary key default gen_random_uuid(),
   announcement_id uuid not null,
@@ -46,6 +49,7 @@ create table announcement_channel_handoffs (
   attempt_count integer not null default 0 check (attempt_count >= 0),
   next_attempt_at timestamptz not null default now(),
   lease_expires_at timestamptz,
+  receiver_may_hold boolean not null default false,
   receiver_status text check (receiver_status is null or receiver_status ~ '^[a-z_]{1,32}$'),
   receiver_reference text check (receiver_reference is null or length(receiver_reference) between 1 and 128),
   last_error text check (last_error is null or last_error ~ '^[a-z0-9_]{1,64}$'),

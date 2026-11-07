@@ -73,8 +73,11 @@ handoff with `200`. `deliverAt` is the announcement's scheduled time, or the
 handoff time if that has passed.
 
 Rescheduling moves an unsent handoff to the new time. Once a handoff may have
-reached Backline, rescheduling is refused; cancel the announcement and draft a
-new one. Cancelling the announcement withdraws its handoffs the same way
+reached Backline, rescheduling is refused with `409`; cancel the announcement
+and draft a new one. That includes a pending handoff an organizer retried after
+an uncertain attempt, because Backline deduplicates on the key and would keep
+the old `deliverAt`. The reschedule locks the handoff rows, so a worker claim
+that lands first also turns the reschedule into a `409`. Cancelling the announcement withdraws its handoffs the same way
 revocation does.
 
 `GET .../announcements/{id}` returns the outcome ledger in `channelHandoffs`,
@@ -143,6 +146,7 @@ A mismatched key or status is treated as uncertain. Other responses:
 | Response | OS outcome |
 | --- | --- |
 | `429` or `503` | Not processed; retried with backoff |
+| `401`, `403` or `408` | Not processed; `failed` and held for an organizer retry (bad signature, clock skew, secret rotation or access). The code is stored |
 | Other `4xx`/`3xx`, body `{"error": "code"}` | `rejected`, final; the code is stored |
 | Other `5xx`, timeout, unreadable acknowledgement | `uncertain`, held |
 | Connection refused before sending | Retried with backoff |
@@ -161,8 +165,12 @@ the same, but the signature covers `v1.receipt.{timestamp}.` plus the body, so a
 captured handoff cannot be replayed as a receipt. OS answers `200` (`recorded`
 or `unchanged`), `401` for a bad signature or timestamp, `404` for an unknown
 key, and `409` for a revision mismatch or a change to a final outcome. Only
-`uncertain` may later resolve. The route is `404` while the adapter is not
-configured.
+`uncertain` may later resolve. A final receipt (`delivered`, `failed` or
+`cancelled`) shows that Backline holds the occurrence, so it also resolves an
+`uncertain` or `failed` transport status to `accepted` and the handoff is no
+longer offered for retry. On a cancel message the receipt also sets
+`receiver_status` to `already_delivered` or `cancelled`. The route is `404`
+while the adapter is not configured.
 
 ## Handoff states
 
@@ -172,7 +180,8 @@ configured.
 - `sending`: claimed with a two-minute lease. An expired lease becomes
   `uncertain`.
 - `accepted`: acknowledged by the receiver; `receiver_status` keeps the reply.
-- `rejected`, `failed` (five attempts used), `uncertain`: held and visible.
+- `rejected` (final), `failed` (five attempts used, or the receiver answered
+  `401`, `403` or `408`), `uncertain`: held and visible.
 - `cancelled`: withdrawn before it was ever sent.
 - `expired`: the delivery window closed before sending.
 
@@ -181,10 +190,16 @@ checks the channel and uses
 `POST .../announcements/{id}/channel-handoffs/{handoffID}/retry`, which resends
 with the same key and revision, so the receiver posts at most once.
 
-Cancellation and revocation leave a pending publish `cancelled`. A publish
-that is `sending`, `accepted`, `uncertain` or `failed` becomes
+`receiver_may_hold` is sticky. It is set when any publish attempt is accepted,
+uncertain or loses its lease, and also by a final delivery receipt. A retry
+that returns the row to `pending` keeps it set.
+
+Cancellation and revocation leave a pending publish `cancelled` only when
+`receiver_may_hold` is false. A publish that is `sending`, `accepted`,
+`uncertain` or `failed`, or pending with `receiver_may_hold` set, becomes
 `operation = cancel` with a fresh attempt count. A worker finishing the old
-publish cannot overwrite that change.
+publish cannot overwrite that change. The worker applies the same rule when it
+claims a publish whose announcement or binding was withdrawn in the meantime.
 
 ## Worker and configuration
 
@@ -204,9 +219,12 @@ The `channel` column on bindings is the seam for a later destination; only
 
 `backend/internal/app/backline_handoff_integration_test.go` runs against
 disposable PostgreSQL and an `httptest` receiver that implements the contract:
-journey and receipt readback, bad signature, uncertain result with a duplicate
-retry, cancel before and after delivery, binding revocation, authority and
-workspace scope, rescheduling, bounded retries and expiry.
+journey and receipt readback, bad signature held for retry, uncertain result
+with a duplicate retry, cancel and revocation after a retried uncertain
+attempt, cancel before and after delivery, binding revocation, authority and
+workspace scope, rescheduling (including a reschedule racing a worker claim),
+a final receipt resolving an uncertain handoff, stale and cross-scope receipt
+signatures, bounded retries and expiry.
 `backline_handoff_test.go` checks the fixture signature vectors, payload fields
 against the contract example and response classification.
 `web/src/components/BacklineHandoffPanel.test.tsx` covers the preview and

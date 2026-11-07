@@ -219,12 +219,10 @@ func (a *App) handleScheduleAnnouncement(w http.ResponseWriter, r *http.Request)
 	}
 	if result.RowsAffected() == 1 {
 		// A Backline handoff the receiver may already hold keeps its time;
-		// one it has not seen follows the new schedule.
-		var sent bool
-		if err := tx.QueryRow(r.Context(), `
-			select exists(select 1 from announcement_channel_handoffs where announcement_id = $1
-			  and not (operation = 'publish' and status in ('pending', 'cancelled', 'rejected', 'expired')))
-		`, announcementID).Scan(&sent); err != nil {
+		// one it has not seen follows the new schedule. The rows are locked
+		// so a worker cannot claim one between this check and the update.
+		sent, pending, err := lockAnnouncementHandoffsForReschedule(r.Context(), tx, announcementID)
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not schedule announcement")
 			return
 		}
@@ -232,12 +230,17 @@ func (a *App) handleScheduleAnnouncement(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusConflict, "announcement was already handed off to Backline; cancel it and draft a new one")
 			return
 		}
-		if _, err := tx.Exec(r.Context(), `
+		moved, err := tx.Exec(r.Context(), `
 			update announcement_channel_handoffs
 			set deliver_at = $2, expires_at = $2::timestamptz + make_interval(secs => $3), updated_at = now()
-			where announcement_id = $1 and operation = 'publish' and status = 'pending'
-		`, announcementID, scheduledFor.UTC().Truncate(time.Second), backlineDeliveryWindow.Seconds()); err != nil {
+			where announcement_id = $1 and operation = 'publish' and status = 'pending' and not receiver_may_hold
+		`, announcementID, scheduledFor.UTC().Truncate(time.Second), backlineDeliveryWindow.Seconds())
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not schedule announcement")
+			return
+		}
+		if moved.RowsAffected() != int64(pending) {
+			writeError(w, http.StatusConflict, "announcement was already handed off to Backline; cancel it and draft a new one")
 			return
 		}
 		if err := tx.Commit(r.Context()); err != nil {
