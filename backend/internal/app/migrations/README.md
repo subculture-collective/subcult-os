@@ -82,12 +82,37 @@ channel on `announcement_channel_bindings` (whose Discord id columns become
 nullable, with a per-channel shape check), the `kork_receipt` consent source
 with `listmonk_binding_id` and `origin_receipt` on `consent_grants`,
 `announcements.delivery_path` (backfilled to `native` for dispatched rows) with
-a path foreign key from `announcement_deliveries`, and
-`announcement_listmonk_deliveries`. Existing rows keep their behavior. The
-previous binary rejects version 33, so keep a pre-migration backup. Before an
-application rollback, stop the `listmonk-workers` profile and unset
-`LISTMONK_URL`/`LISTMONK_API_USER`/`LISTMONK_API_TOKEN`. The restored
-binary's native consent check does not know `listmonk_binding_id`, so it would
-treat Kork-origin grants as native email consent: withdraw the `kork_receipt`
-grants (operator withdrawal) or keep the `announcement-workers` profile stopped
-before it runs. Retain the binding and delivery rows for audit.
+a path foreign key from `announcement_deliveries`, an `email_outbox` trigger
+that refuses an announcement row for a listmonk occurrence, and
+`announcement_listmonk_deliveries`. It also narrows `consent_grants_active_idx`
+to native grants (`listmonk_binding_id is null`) and adds
+`consent_grants_kork_active_idx`, one active Kork grant per (binding, address).
+Existing rows keep their behavior.
+
+The previous binary rejects version 33, so the supported rollback is restoring
+the pre-migration backup with the `listmonk-workers` profile stopped and
+`LISTMONK_URL`/`LISTMONK_API_USER`/`LISTMONK_API_TOKEN` unset. Never run an
+older binary against version 33 data with `kork_receipt` rows still active:
+its native consent check doesn't know `listmonk_binding_id`, so it would treat
+them as native email consent. A hand-written down-step must, in this order,
+withdraw (or delete) the Kork grants before the column goes, then restore the
+original index (dropping the column also drops both partial indexes):
+
+```sql
+drop trigger email_outbox_announcement_path_guard on email_outbox;
+drop function email_outbox_announcement_path_guard();
+-- Withdrawn rows authorize nothing in any binary, so this keeps them for
+-- audit. Delete them instead if they are not needed.
+update consent_grants set withdrawn_at = coalesce(withdrawn_at, now()),
+  withdrawal_reason = coalesce(withdrawal_reason, 'listmonk_rollback')
+  where source = 'kork_receipt';
+drop index consent_grants_kork_active_idx;
+drop index consent_grants_active_idx;
+alter table consent_grants drop column listmonk_binding_id, drop column origin_receipt;
+create unique index consent_grants_active_idx
+  on consent_grants (workspace_id, channel, recipient_address, purpose)
+  where withdrawn_at is null;
+```
+
+The migration-rollback tests use the same steps, deleting the Kork rows. Retain the binding and
+delivery rows for audit.

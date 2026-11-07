@@ -15,7 +15,8 @@ import (
 
 // listmonk-relay sends due listmonk announcement deliveries through the
 // configured listmonk. It refuses to run unless LISTMONK_URL,
-// LISTMONK_API_USER and LISTMONK_API_TOKEN are set. See docs/development/listmonk-relay.md.
+// LISTMONK_API_USER and LISTMONK_API_TOKEN are set and MAIL_DELIVERY_ENABLED
+// is true. See docs/development/listmonk-relay.md.
 func main() {
 	watch := flag.Bool("watch", false, "repeat bounded batches every 30 seconds")
 	limit := flag.Int("limit", 10, "maximum deliveries per batch (1-100)")
@@ -31,6 +32,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "invalid configuration; inspect LISTMONK_* settings")
 		os.Exit(1)
 	}
+	if !config.MailDeliveryEnabled {
+		fmt.Fprintln(os.Stderr, "mail delivery is disabled; the relay sends nothing until MAIL_DELIVERY_ENABLED=true")
+		os.Exit(1)
+	}
 	if config.DatabaseURL == "" {
 		fmt.Fprintln(os.Stderr, "DATABASE_URL is required")
 		os.Exit(1)
@@ -42,9 +47,9 @@ func main() {
 	}
 	defer db.Close()
 	for {
-		batchCtx, cancel := context.WithTimeout(ctx, time.Duration(*limit)*20*time.Second+30*time.Second)
-		report, err := app.RunListmonkRelay(batchCtx, config, db, *limit, nil)
-		cancel()
+		// No batch deadline: each delivery has its own deadline inside the
+		// relay, so a slow batch never cuts a /api/tx call short.
+		report, err := app.RunListmonkRelay(ctx, config, db, *limit, nil)
 		if ctx.Err() != nil {
 			return
 		}

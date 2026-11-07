@@ -66,14 +66,17 @@ without a real grant.
 | `disclosure_version` | Opaque operator-supplied label identifying which disclosure text the recipient agreed to. Recorded so a future audit or re-consent campaign can tell which recipients agreed to an older disclosure. This slice does not interpret the value. |
 | `granted_at` | When the grant was created (not when it was verified). |
 | `withdrawn_at` / `withdrawal_reason` | Set once, never cleared. A withdrawn grant is permanently inactive; recording a new grant for the same tuple requires the old one to already be withdrawn (see the unique index below). |
-| `source` | `'explicit_form'` (recipient submitted a public form themselves) or `'operator_recorded'` (an operator recorded a grant obtained elsewhere, e.g. a paper sign-up sheet). Both still require the same verification step before the grant is active. `'kork_receipt'` (migration 000033) is a Kork double opt-in receipt that matched a listmonk binding's receiver policy; it is scoped to that binding through `listmonk_binding_id`, never authorizes native email and is described in [`listmonk-relay.md`](listmonk-relay.md). |
+| `source` | `'explicit_form'` (recipient submitted a public form themselves) or `'operator_recorded'` (an operator recorded a grant obtained elsewhere, e.g. a paper sign-up sheet). Both still require the same verification step before the grant is active. `'kork_receipt'` (migration 000033) is a Kork sign-up receipt that matched a listmonk binding's receiver policy, recorded only while listmonk holds the address as a confirmed member of the bound list (the receipt itself is written before Kork's double opt-in, so the listmonk membership is the authority); it is scoped to that binding through `listmonk_binding_id`, never authorizes native email and is described in [`listmonk-relay.md`](listmonk-relay.md). |
 | `created_by_person_id` | The operator who recorded the grant. |
 
 **Unique active grant**: a partial unique index on
 `(workspace_id, channel, recipient_address, purpose) where withdrawn_at is
-null` means at most one non-withdrawn row per tuple, whether or not it is
-yet verified. Recording a second grant for an address that already has an
-active one is a `409`; the caller must withdraw the existing grant first.
+null and listmonk_binding_id is null` means at most one non-withdrawn native
+row per tuple, whether or not it is yet verified. Recording a second grant
+for an address that already has an active one is a `409`; the caller must
+withdraw the existing grant first. Kork-origin grants are outside this index
+and have their own, one active row per (listmonk binding, address), so they
+never block native consent.
 
 **Private, never projected**: no public route in this codebase reads
 `consent_grants`, and none should ever be added to the allowlisted
@@ -189,6 +192,12 @@ All four are new in this slice; nothing else changes route behavior.
   band (reply email, phone, in person). Scoped to the workspace in the
   path; a grant id from another workspace is a `404`. Records
   `withdrawal_reason = "operator_recorded"` and an audit entry.
+
+Both withdraw routes withdraw the person, not one row: when the withdrawn
+grant is an announcement grant, every other active announcement grant for
+the same address and channel in that workspace is withdrawn with it. Since
+migration 000033 an address can hold a native grant and Kork-origin grants
+at once, and a "stop receiving these messages" link must stop all of them.
 
 `manage_consent` is a new permission, granted to `owner` and `organizer`
 (the same set as `manage_delegations`), not `manage_members`: recording or

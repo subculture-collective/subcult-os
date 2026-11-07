@@ -1,9 +1,10 @@
 -- Issue #220: relay an approved announcement to one explicitly bound listmonk
 -- list. See docs/development/listmonk-relay.md.
 --
--- Additive except for two widened constraints: announcement bindings admit a
--- second channel, and consent grants admit a Kork-origin source. No existing
--- row, Backline handoff or native email behavior changes.
+-- Additive except for two widened constraints (announcement bindings admit a
+-- second channel, and consent grants admit a Kork-origin source) and one
+-- narrowed index (the native one-active-grant index skips Kork-origin rows).
+-- No existing row, Backline handoff or native email behavior changes.
 
 -- Bindings reuse the channel seam from 000032. A listmonk binding names one
 -- list, one transactional template, one sender address and the disclosure
@@ -48,6 +49,18 @@ alter table consent_grants
     and (source = 'kork_receipt') = (origin_receipt is not null)
   );
 
+-- Kork-origin grants never count as native consent, so they leave the native
+-- one-active-grant-per-address index and get their own per-(binding, address)
+-- index. An address can then hold an active native grant and an active Kork
+-- grant at once, and a Kork grant never blocks native consent.
+drop index if exists consent_grants_active_idx;
+create unique index consent_grants_active_idx
+  on consent_grants (workspace_id, channel, recipient_address, purpose)
+  where withdrawn_at is null and listmonk_binding_id is null;
+create unique index consent_grants_kork_active_idx
+  on consent_grants (listmonk_binding_id, recipient_address, purpose)
+  where withdrawn_at is null and listmonk_binding_id is not null;
+
 -- Single-path routing. Dispatch records the occurrence's path once. Each
 -- path's per-recipient rows carry a constant path and a foreign key to
 -- (announcement, path), so one occurrence can never have both native outbox
@@ -77,6 +90,9 @@ create table announcement_listmonk_deliveries (
   status text not null default 'pending'
     check (status in ('held', 'pending', 'sending', 'accepted', 'rejected', 'uncertain', 'failed', 'withheld', 'suppressed', 'expired')),
   attempt_count integer not null default 0 check (attempt_count >= 0),
+  -- A fresh token per claim. An outcome write must carry the token of the
+  -- claim it belongs to, so a stalled worker can't overwrite a later claim.
+  claim_token uuid,
   next_attempt_at timestamptz not null default now(),
   lease_expires_at timestamptz,
   last_error text check (last_error is null or last_error ~ '^[a-z0-9_]{1,64}$'),
@@ -93,3 +109,23 @@ create index announcement_listmonk_deliveries_due_idx
   on announcement_listmonk_deliveries (next_attempt_at) where status in ('pending', 'sending');
 create index announcement_listmonk_deliveries_binding_idx
   on announcement_listmonk_deliveries (binding_id) where status in ('held', 'pending');
+
+-- The native outbox can't gain an announcement row for a listmonk
+-- occurrence either. Dispatch sets delivery_path before it enqueues, and
+-- announcement_deliveries already carries the path foreign key; this guard
+-- also covers an email_outbox row written without its delivery link.
+create or replace function email_outbox_announcement_path_guard() returns trigger
+language plpgsql as $$
+begin
+  if new.related_type = 'announcement' and exists (
+    select 1 from announcements where id = new.related_id and delivery_path = 'listmonk'
+  ) then
+    raise exception 'announcement % is delivered through listmonk', new.related_id using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists email_outbox_announcement_path_guard on email_outbox;
+create trigger email_outbox_announcement_path_guard
+  before insert or update of related_type, related_id on email_outbox
+  for each row execute function email_outbox_announcement_path_guard();

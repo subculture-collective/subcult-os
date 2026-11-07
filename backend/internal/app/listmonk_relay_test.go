@@ -96,3 +96,55 @@ func TestListmonkRelayConfigValidation(t *testing.T) {
 		t.Fatalf("http outside production: %v", problems)
 	}
 }
+
+func TestNormalizeKorkListURL(t *testing.T) {
+	// Kork internal/blocks/newblocks.go listmonkURL: host lowercased, path
+	// case kept, one trailing slash removed.
+	cases := map[string]string{
+		"https://lists.example.test":              "https://lists.example.test",
+		" https://Lists.Example.TEST/ ":           "https://lists.example.test",
+		"HTTPS://Lists.Example.TEST/News/Letter/": "https://lists.example.test/News/Letter",
+		"https://lists.example.test:8443/a":       "https://lists.example.test:8443/a",
+	}
+	for raw, want := range cases {
+		if got, ok := normalizeKorkListURL(raw); !ok || got != want {
+			t.Fatalf("%q: got %q (%v), want %q", raw, got, ok, want)
+		}
+	}
+	for _, raw := range []string{"", "http://lists.example.test", "https://user:pw@lists.example.test", "https://lists.example.test/?q=1",
+		"https://lists.example.test/#x", "https:lists.example.test", "https://" + strings.Repeat("a", 300)} {
+		if got, ok := normalizeKorkListURL(raw); ok {
+			t.Fatalf("%q accepted as %q", raw, got)
+		}
+	}
+}
+
+func TestKorkMembershipProblem(t *testing.T) {
+	member := func(status, listStatus string) *listmonkSubscriber {
+		sub := &listmonkSubscriber{ID: 1, Status: status}
+		if listStatus != "" {
+			sub.Lists = append(sub.Lists, struct {
+				ID                 int64  `json:"id"`
+				SubscriptionStatus string `json:"subscription_status"`
+			}{ID: 7, SubscriptionStatus: listStatus})
+		}
+		return sub
+	}
+	cases := []struct {
+		sub  *listmonkSubscriber
+		want string
+	}{
+		{nil, "listmonk_membership_unconfirmed"},
+		{member("enabled", ""), "listmonk_membership_unconfirmed"},
+		{member("enabled", "unconfirmed"), "listmonk_membership_unconfirmed"},
+		{member("enabled", "unsubscribed"), "listmonk_unsubscribed"},
+		{member("blocklisted", "confirmed"), "listmonk_subscriber_blocked"},
+		{member("disabled", "confirmed"), "listmonk_subscriber_blocked"},
+		{member("enabled", "confirmed"), ""},
+	}
+	for i, tc := range cases {
+		if got := korkMembershipProblem(tc.sub, 7); got != tc.want {
+			t.Fatalf("case %d: got %q, want %q", i, got, tc.want)
+		}
+	}
+}

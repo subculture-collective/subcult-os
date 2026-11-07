@@ -218,6 +218,23 @@ func (a *App) handleConfirmConsentGrant(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "verified"})
 }
 
+// linkedAnnouncementWithdrawal is a CTE that follows a "target" CTE of
+// withdrawn grants. A withdrawal of announcement consent covers the person,
+// not one grant row: an address can hold a native grant and Kork-origin
+// grants (#220) in the same workspace, and all of them are withdrawn. reason
+// is a fixed literal, never input.
+func linkedAnnouncementWithdrawal(reason string) string {
+	return `linked as (
+			update consent_grants g
+			set withdrawn_at = now(), withdrawal_reason = '` + reason + `'
+			from target t
+			where t.purpose = 'announcement' and g.purpose = 'announcement' and g.workspace_id = t.workspace_id
+			  and g.channel = t.channel and g.recipient_address = t.recipient_address
+			  and g.withdrawn_at is null and g.id not in (select id from target)
+			returning g.id
+		)`
+}
+
 // handleWithdrawConsentGrant is the public, tokenized unsubscribe route
 // (POST only, so link-prefetching mail scanners cannot withdraw on the
 // recipient's behalf; the emailed link opens the web page that posts).
@@ -235,12 +252,16 @@ func (a *App) handleWithdrawConsentGrant(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	result, err := a.db.Exec(r.Context(), `
-		update consent_grants
-		set withdrawn_at = coalesce(withdrawn_at, now()),
-		    withdrawal_reason = coalesce(withdrawal_reason, 'recipient_requested')
-		where verification_token_hash = $1 or id in (
-			select grant_id from consent_withdraw_tokens where token_hash = $1
-		)
+		with target as (
+			update consent_grants
+			set withdrawn_at = coalesce(withdrawn_at, now()),
+			    withdrawal_reason = coalesce(withdrawal_reason, 'recipient_requested')
+			where verification_token_hash = $1 or id in (
+				select grant_id from consent_withdraw_tokens where token_hash = $1
+			)
+			returning id, workspace_id, channel, recipient_address, purpose
+		), `+linkedAnnouncementWithdrawal("recipient_requested")+`
+		select 1 from target
 	`, tokenHash(token))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not withdraw consent grant")
@@ -274,10 +295,14 @@ func (a *App) handleOperatorWithdrawConsentGrant(w http.ResponseWriter, r *http.
 		return
 	}
 	result, err := a.db.Exec(r.Context(), `
-		update consent_grants
-		set withdrawn_at = coalesce(withdrawn_at, now()),
-		    withdrawal_reason = coalesce(withdrawal_reason, 'operator_recorded')
-		where id = $1 and workspace_id = $2
+		with target as (
+			update consent_grants
+			set withdrawn_at = coalesce(withdrawn_at, now()),
+			    withdrawal_reason = coalesce(withdrawal_reason, 'operator_recorded')
+			where id = $1 and workspace_id = $2
+			returning id, workspace_id, channel, recipient_address, purpose
+		), `+linkedAnnouncementWithdrawal("operator_recorded")+`
+		select 1 from target
 	`, grantID, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not withdraw consent grant")

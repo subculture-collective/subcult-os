@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -133,11 +132,9 @@ func (a *App) handleCreateListmonkBinding(w http.ResponseWriter, r *http.Request
 	}
 	var kork *korkPolicyBody
 	if req.KorkPolicy != nil {
-		kork = &korkPolicyBody{ListURL: strings.TrimRight(strings.ToLower(strings.TrimSpace(req.KorkPolicy.ListURL)), "/"),
-			Sender: req.KorkPolicy.Sender, Purpose: req.KorkPolicy.Purpose, Disclosure: req.KorkPolicy.Disclosure}
-		parsed, err := url.Parse(kork.ListURL)
-		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
-			kork.Sender == "" || len(kork.Sender) > 200 || kork.Purpose == "" || len(kork.Purpose) > 200 || kork.Disclosure == "" || len(kork.Disclosure) > 1000 {
+		listURL, urlOK := normalizeKorkListURL(req.KorkPolicy.ListURL)
+		kork = &korkPolicyBody{ListURL: listURL, Sender: req.KorkPolicy.Sender, Purpose: req.KorkPolicy.Purpose, Disclosure: req.KorkPolicy.Disclosure}
+		if !urlOK || kork.Sender == "" || len(kork.Sender) > 200 || kork.Purpose == "" || len(kork.Purpose) > 200 || kork.Disclosure == "" || len(kork.Disclosure) > 1000 {
 			writeError(w, http.StatusBadRequest, "korkPolicy needs an https listUrl and the exact sender, purpose and disclosure text")
 			return
 		}
@@ -203,7 +200,9 @@ func (a *App) handleCreateListmonkBinding(w http.ResponseWriter, r *http.Request
 
 // handleRevokeListmonkBinding keeps the binding for audit, withholds its
 // unsent deliveries and stops new dispatches from routing to it. Kork-origin
-// grants scoped to it authorize nothing afterwards.
+// grants scoped to it are withdrawn, so they authorize nothing afterwards and
+// leave nothing active behind. The binding never added anyone to the
+// listmonk list, so there is nothing to undo there.
 func (a *App) handleRevokeListmonkBinding(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceID")
 	if a.db == nil {
@@ -252,8 +251,18 @@ func (a *App) handleRevokeListmonkBinding(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "could not withhold deliveries")
 		return
 	}
+	korkWithdrawn, err := tx.Exec(r.Context(), `
+		update consent_grants set withdrawn_at = now(), withdrawal_reason = $2
+		where listmonk_binding_id = $1 and withdrawn_at is null
+	`, bindingID, korkBindingRevokedReason)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not withdraw kork grants")
+		return
+	}
 	txCtx := context.WithValue(r.Context(), txContextKey{}, tx)
-	if err := a.audit(txCtx, actorID, "announcement.channel_binding.revoked", "announcement_channel_binding", binding.ID, map[string]any{"workspaceId": workspaceID}); err != nil {
+	if err := a.audit(txCtx, actorID, "announcement.channel_binding.revoked", "announcement_channel_binding", binding.ID, map[string]any{
+		"workspaceId": workspaceID, "korkGrantsWithdrawn": korkWithdrawn.RowsAffected(),
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not record audit")
 		return
 	}
@@ -269,10 +278,27 @@ type importKorkGrantRequest struct {
 	Receipt          json.RawMessage `json:"receipt"`
 }
 
-// handleImportKorkGrant records a verified announcement grant from a Kork
-// sign-up receipt, scoped to this listmonk binding, only when the receipt
-// names exactly the binding's list, sender, purpose and disclosure. Anything
-// else is refused and the recipient needs the native confirmation flow.
+// korkBindingRevokedReason marks Kork grants withdrawn because their binding
+// was revoked. It records no decision by the person, so it doesn't block a
+// later import for another binding.
+const korkBindingRevokedReason = "listmonk_binding_revoked"
+
+// handleImportKorkGrant records a verified announcement grant scoped to this
+// listmonk binding. Two things must both hold:
+//
+//   - The Kork receipt names exactly the binding's list, sender, purpose and
+//     disclosure. It is supporting evidence only: Kork writes it at sign-up
+//     request, before double opt-in, and it carries no address.
+//   - listmonk has the address as an enabled subscriber with a confirmed
+//     membership of the bound list. Kork pushes an address only after its
+//     double opt-in, so this is the authority. The same check runs again
+//     before every send.
+//
+// The receipt's "at" is chosen by whoever supplies it, so it never overrides
+// a withdrawal: any withdrawal of this address's announcement consent in the
+// workspace after the receipt time or after the binding was created refuses
+// the import. Anything else is refused and the person needs the native
+// confirmation flow.
 func (a *App) handleImportKorkGrant(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceID")
 	if a.db == nil {
@@ -299,14 +325,8 @@ func (a *App) handleImportKorkGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "recipientAddress is required")
 		return
 	}
-	tx, err := a.db.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not record consent grant")
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	binding, err := scanListmonkBinding(tx.QueryRow(r.Context(), `select `+listmonkBindingColumns+` from announcement_channel_bindings
-		where id = $1 and workspace_id = $2 and channel = $3 for share`, bindingID, workspaceID, channelListmonkName))
+	binding, err := scanListmonkBinding(a.db.QueryRow(r.Context(), `select `+listmonkBindingColumns+` from announcement_channel_bindings
+		where id = $1 and workspace_id = $2 and channel = $3`, bindingID, workspaceID, channelListmonkName))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "binding not found")
 		return
@@ -328,12 +348,55 @@ func (a *App) handleImportKorkGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, code)
 		return
 	}
+	if !a.config.listmonkRelayConfigured() {
+		writeError(w, http.StatusConflict, "listmonk relay is not configured")
+		return
+	}
+	// Ask listmonk before opening the transaction, so no lock is held during
+	// the HTTP call. The binding is locked and rechecked below.
+	subscriber, lookup := newListmonkClient(a.config, nil).findSubscriber(r.Context(), recipient)
+	switch {
+	case lookup.err != nil || lookup.status >= 500 || lookup.status == http.StatusTooManyRequests:
+		writeError(w, http.StatusBadGateway, "listmonk is unavailable")
+		return
+	case lookup.status == http.StatusUnauthorized || lookup.status == http.StatusForbidden:
+		writeError(w, http.StatusBadGateway, "listmonk rejected the configured API user")
+		return
+	case lookup.status != http.StatusOK:
+		writeError(w, http.StatusBadGateway, "listmonk could not look the subscriber up")
+		return
+	}
+	switch problem := korkMembershipProblem(subscriber, binding.ListID); problem {
+	case "":
+	case "listmonk_membership_unconfirmed":
+		writeError(w, http.StatusUnprocessableEntity, problem)
+		return
+	default:
+		writeError(w, http.StatusConflict, problem)
+		return
+	}
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not record consent grant")
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	var active bool
+	if err := tx.QueryRow(r.Context(), `select revoked_at is null from announcement_channel_bindings where id = $1 for share`, binding.ID).Scan(&active); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load binding")
+		return
+	}
+	if !active {
+		writeError(w, http.StatusConflict, "binding is revoked")
+		return
+	}
 	var suppressed, withdrawnLater bool
 	if err := tx.QueryRow(r.Context(), `
 		select exists(select 1 from email_suppressions where recipient_email = $1),
 		       exists(select 1 from consent_grants where workspace_id = $2 and channel = 'email' and recipient_address = $1
-		              and purpose = $3 and withdrawn_at >= $4)
-	`, recipient, workspaceID, consentPurposeAnnouncement, receipt.At).Scan(&suppressed, &withdrawnLater); err != nil {
+		              and purpose = $3 and withdrawn_at is not null and withdrawal_reason is distinct from $6
+		              and (withdrawn_at >= $4 or withdrawn_at >= $5))
+	`, recipient, workspaceID, consentPurposeAnnouncement, receipt.At, binding.CreatedAt, korkBindingRevokedReason).Scan(&suppressed, &withdrawnLater); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not record consent grant")
 		return
 	}
@@ -341,7 +404,8 @@ func (a *App) handleImportKorkGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "recipient_suppressed")
 		return
 	}
-	// A receipt older than a recorded withdrawal never restores consent.
+	// A withdrawal after the receipt time or after the binding was created
+	// is never undone by a receipt.
 	if withdrawnLater {
 		writeError(w, http.StatusConflict, "grant_withdrawn")
 		return
@@ -362,7 +426,7 @@ func (a *App) handleImportKorkGrant(w http.ResponseWriter, r *http.Request) {
 		returning id::text
 	`, workspaceID, recipient, consentPurposeAnnouncement, hashed, consentSourceKorkReceipt, actorID, binding.ID, string(stored)).Scan(&grantID)
 	if isUniqueViolation(err) {
-		writeError(w, http.StatusConflict, "an active consent grant already exists for this recipient and purpose")
+		writeError(w, http.StatusConflict, "an active kork grant already exists for this recipient and binding")
 		return
 	}
 	if err != nil {

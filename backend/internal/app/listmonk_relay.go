@@ -35,6 +35,11 @@ const (
 	listmonkMaxAttempts      = 5
 	listmonkRequestTimeout   = 15 * time.Second
 	listmonkLease            = 2 * time.Minute
+	// listmonkDeliveryTimeout bounds one recipient's listmonk calls (at most
+	// three of listmonkRequestTimeout each) and stays under the lease, so a live worker always writes its
+	// own outcome before the lease sweep could mark the row uncertain.
+	listmonkDeliveryTimeout  = 90 * time.Second
+	listmonkOutcomeTimeout   = 10 * time.Second
 	listmonkDeliveryWindow   = 23 * time.Hour
 	listmonkMaxResponseBytes = 256 << 10
 	listmonkStatusHeld       = "held"
@@ -91,17 +96,42 @@ type korkReceipt struct {
 }
 
 // korkListKey is the "list" value Kork writes for a listmonk destination:
-// "listmonk:" + the block's listmonk URL (lowercased, no trailing slash) +
-// "#" + the list id (kork internal/blocks/newblocks.go Signup.ListKey).
+// "listmonk:" + the block's listmonk URL (normalized by
+// normalizeKorkListURL) + "#" + the list id (kork
+// internal/blocks/newblocks.go Signup.ListKey).
 func korkListKey(listURL string, listID int64) string {
 	return "listmonk:" + listURL + "#" + strconv.FormatInt(listID, 10)
 }
 
-// validateKorkReceipt decides whether a Kork receipt explicitly authorizes
-// this binding: the exact list, sender, purpose and disclosure the binding's
-// receiver policy names, a known version and a recent, plausible time. It
-// returns an error code, or "" when the receipt counts. Any other receipt
-// needs fresh confirmation through the native consent flow.
+// normalizeKorkListURL normalizes a listmonk URL exactly the way Kork does
+// before it writes the receipt (kork internal/blocks/newblocks.go
+// listmonkURL): an https URL without credentials, query or fragment, with
+// only the host lowercased and one trailing slash removed. The path keeps
+// its case, so a receipt's list key compares equal.
+func normalizeKorkListURL(raw string) (string, bool) {
+	v := strings.TrimSpace(raw)
+	if len(v) > 300 {
+		return "", false
+	}
+	u, err := url.Parse(v)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
+		u.Opaque != "" || strings.ContainsAny(u.Host, " \t") {
+		return "", false
+	}
+	u.Path = strings.TrimSuffix(u.Path, "/")
+	u.RawPath = ""
+	u.Host = strings.ToLower(u.Host)
+	return u.String(), true
+}
+
+// validateKorkReceipt checks that a Kork receipt names exactly the list,
+// sender, purpose and disclosure the binding's receiver policy names, with a
+// known version and a recent, plausible time. It returns an error code, or ""
+// when the receipt matches. A matching receipt is supporting evidence only:
+// Kork writes it at sign-up request, before double opt-in, and nothing in it
+// identifies the address or proves confirmation. The authority for a Kork
+// grant is a confirmed membership of the bound list in listmonk, which the
+// import and every send check (korkMembershipProblem).
 func validateKorkReceipt(binding listmonkBinding, raw json.RawMessage, now time.Time) (korkReceipt, string) {
 	var receipt korkReceipt
 	if binding.KorkListURL == nil || binding.KorkSender == nil || binding.KorkPurpose == nil || binding.KorkDisclosure == nil {
@@ -224,11 +254,50 @@ func (c listmonkClient) checkList(ctx context.Context, listID int64) listmonkRes
 
 type listmonkSubscriber struct {
 	ID     int64  `json:"id"`
-	Status string `json:"status"`
+	Status string `json:"status"` // enabled, disabled, blocklisted
 	Lists  []struct {
 		ID                 int64  `json:"id"`
-		SubscriptionStatus string `json:"subscription_status"`
+		SubscriptionStatus string `json:"subscription_status"` // unconfirmed, confirmed, unsubscribed
 	} `json:"lists"`
+}
+
+// blocked reports a subscriber the list owner blocklisted or disabled.
+// Either one suppresses every relayed message.
+func (s *listmonkSubscriber) blocked() bool {
+	return s.Status == "blocklisted" || s.Status == "disabled"
+}
+
+// listStatus is the subscriber's subscription status on one list, or ""
+// when they are not on it.
+func (s *listmonkSubscriber) listStatus(listID int64) string {
+	for _, list := range s.Lists {
+		if list.ID == listID {
+			return list.SubscriptionStatus
+		}
+	}
+	return ""
+}
+
+// korkMembershipProblem is the authority check for a Kork-origin grant: the
+// address must be an enabled listmonk subscriber whose membership of the
+// bound list is confirmed. Kork pushes an address to listmonk only after its
+// double opt-in, so this is the evidence the receipt can't give. It returns
+// "" when the membership counts, otherwise a refusal code.
+func korkMembershipProblem(subscriber *listmonkSubscriber, listID int64) string {
+	switch {
+	case subscriber == nil:
+		return "listmonk_membership_unconfirmed"
+	case subscriber.blocked():
+		return "listmonk_subscriber_blocked"
+	}
+	switch subscriber.listStatus(listID) {
+	case "confirmed":
+		return ""
+	case "unsubscribed":
+		return "listmonk_unsubscribed"
+	default:
+		return "listmonk_membership_unconfirmed"
+	}
 }
 
 // findSubscriber looks one address up. listmonk's query parameter is an SQL
@@ -272,6 +341,9 @@ type ListmonkRelayReport struct {
 
 // RunListmonkRelay sends due listmonk deliveries. It is opt-in: without
 // LISTMONK_URL, LISTMONK_API_USER and LISTMONK_API_TOKEN it refuses to run.
+// MAIL_DELIVERY_ENABLED is the emergency stop: while it is false the relay
+// touches no row and sends nothing, including rows already pending or
+// requeued by a retry.
 func RunListmonkRelay(ctx context.Context, config Config, db *pgxpool.Pool, limit int, httpClient *http.Client) (ListmonkRelayReport, error) {
 	report := ListmonkRelayReport{}
 	if db == nil {
@@ -279,6 +351,9 @@ func RunListmonkRelay(ctx context.Context, config Config, db *pgxpool.Pool, limi
 	}
 	if limit < 1 || limit > 100 {
 		return report, errors.New("listmonk relay batch limit must be 1..100")
+	}
+	if !config.MailDeliveryEnabled {
+		return report, errors.New("mail delivery is disabled")
 	}
 	if !config.listmonkRelayConfigured() {
 		return report, errors.New("listmonk relay requires LISTMONK_URL, LISTMONK_API_USER and LISTMONK_API_TOKEN")
@@ -304,6 +379,9 @@ func RunListmonkRelay(ctx context.Context, config Config, db *pgxpool.Pool, limi
 	report.Expired = int(expired.RowsAffected())
 	client := newListmonkClient(config, httpClient)
 	for range limit {
+		if ctx.Err() != nil {
+			return report, ctx.Err()
+		}
 		claimed, outcome, err := deliverOneListmonk(ctx, db, client)
 		if err != nil {
 			return report, err
@@ -336,8 +414,12 @@ func RunListmonkRelay(ctx context.Context, config Config, db *pgxpool.Pool, limi
 
 type claimedListmonkDelivery struct {
 	id, grantID, bindingID, recipient, subject, body, senderAddress string
+	claimToken                                                      string
 	listID, templateID                                              int64
 	attempt                                                         int
+	// korkGrant is true for a Kork-origin grant, whose authority is a
+	// confirmed listmonk membership rather than Subcult OS confirmation.
+	korkGrant bool
 }
 
 func deliverOneListmonk(ctx context.Context, db *pgxpool.Pool, client listmonkClient) (bool, string, error) {
@@ -351,31 +433,48 @@ func deliverOneListmonk(ctx context.Context, db *pgxpool.Pool, client listmonkCl
 			for update skip locked
 		)
 		update announcement_listmonk_deliveries d
-		set status = 'sending', attempt_count = d.attempt_count + 1,
+		set status = 'sending', attempt_count = d.attempt_count + 1, claim_token = gen_random_uuid(),
 		    lease_expires_at = now() + make_interval(secs => $1), updated_at = now()
-		from candidate, announcement_channel_bindings b
-		where d.id = candidate.id and b.id = d.binding_id
+		from candidate, announcement_channel_bindings b, consent_grants g
+		where d.id = candidate.id and b.id = d.binding_id and g.id = d.grant_id
 		returning d.id::text, d.grant_id::text, d.binding_id::text, d.recipient_address, d.subject, d.body,
-		          b.sender_address, b.listmonk_list_id, b.listmonk_template_id, d.attempt_count
+		          b.sender_address, b.listmonk_list_id, b.listmonk_template_id, d.attempt_count, d.claim_token::text,
+		          g.listmonk_binding_id is not null
 	`, listmonkLease.Seconds()).Scan(&d.id, &d.grantID, &d.bindingID, &d.recipient, &d.subject, &d.body,
-		&d.senderAddress, &d.listID, &d.templateID, &d.attempt)
+		&d.senderAddress, &d.listID, &d.templateID, &d.attempt, &d.claimToken, &d.korkGrant)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, "", nil
 	}
 	if err != nil {
 		return false, "", errors.New("listmonk delivery claim failed")
 	}
-	status, code := sendOneListmonk(ctx, db, client, d)
+	// Each recipient gets its own deadline, shorter than the lease, so a
+	// batch deadline never cuts a /api/tx call short. The outcome is written
+	// even if the worker is being stopped: an interrupted send is recorded
+	// as uncertain rather than left for the lease sweep.
+	sendCtx, cancel := context.WithTimeout(ctx, listmonkDeliveryTimeout)
+	status, code := sendOneListmonk(sendCtx, db, client, d)
+	cancel()
 	if status == listmonkStatusPending && d.attempt >= listmonkMaxAttempts {
 		status = listmonkStatusFailed
 	}
-	return true, status, recordListmonkOutcome(ctx, db, d, status, code)
+	outcomeCtx, cancelOutcome := context.WithTimeout(context.WithoutCancel(ctx), listmonkOutcomeTimeout)
+	defer cancelOutcome()
+	return true, status, recordListmonkOutcome(outcomeCtx, db, d, status, code)
 }
 
 // sendOneListmonk runs the per-recipient steps. Consent, suppression and the
 // binding are checked before anything reaches listmonk and again right before
 // the /api/tx call. Only that call can leave an uncertain outcome; failures
 // before it are safe to retry because nothing was sent.
+//
+// The relay never adds anyone to the bound list or changes a list
+// membership. A native-grant recipient only needs a subscriber record for
+// /api/tx (https://listmonk.app/docs/apis/transactional/, subscriber_mode
+// "default": "Recipients must exist as subscribers in the database"), so one
+// is created with no lists when missing. A Kork-grant recipient must already
+// be a confirmed, enabled member of the bound list; the relay never creates
+// or confirms one.
 func sendOneListmonk(ctx context.Context, db *pgxpool.Pool, client listmonkClient, d claimedListmonkDelivery) (status, code string) {
 	if denied, code := listmonkConsentDenied(ctx, db, d); denied != "" {
 		return denied, code
@@ -385,41 +484,30 @@ func sendOneListmonk(ctx context.Context, db *pgxpool.Pool, client listmonkClien
 		return status, code
 	}
 	if subscriber != nil {
-		if subscriber.Status == "blocklisted" {
-			return listmonkStatusSuppressed, "provider_blocklisted"
+		if subscriber.blocked() {
+			return listmonkStatusSuppressed, "provider_" + subscriber.Status
 		}
-		onList := false
-		for _, list := range subscriber.Lists {
-			if list.ID != d.listID {
-				continue
+		if subscriber.listStatus(d.listID) == "unsubscribed" {
+			// The person left the bound list in listmonk. Record it as a
+			// withdrawal so no later occurrence uses the grant either.
+			if _, err := db.Exec(ctx, `
+				update consent_grants set withdrawn_at = coalesce(withdrawn_at, now()),
+				  withdrawal_reason = coalesce(withdrawal_reason, 'listmonk_unsubscribed')
+				where id = $1`, d.grantID); err != nil {
+				return listmonkStatusPending, "grant_withdraw_failed"
 			}
-			if list.SubscriptionStatus == "unsubscribed" {
-				// The person left the bound list in listmonk. Record it as a
-				// withdrawal so no later occurrence uses the grant either.
-				if _, err := db.Exec(ctx, `
-					update consent_grants set withdrawn_at = coalesce(withdrawn_at, now()),
-					  withdrawal_reason = coalesce(withdrawal_reason, 'listmonk_unsubscribed')
-					where id = $1`, d.grantID); err != nil {
-					return listmonkStatusPending, "grant_withdraw_failed"
-				}
-				return listmonkStatusSuppressed, "provider_unsubscribed"
-			}
-			onList = true
+			return listmonkStatusSuppressed, "provider_unsubscribed"
 		}
-		if !onList {
-			// Subcult OS confirmed this address itself, so it joins the bound
-			// list as confirmed. An unsubscribe on that list is never undone.
-			result = client.call(ctx, http.MethodPut, "/api/subscribers/lists", map[string]any{
-				"ids": []int64{subscriber.ID}, "action": "add", "target_list_ids": []int64{d.listID}, "status": "confirmed",
-			})
-			if status, code := classifyListmonkPreSend(result); status != "" {
-				return status, code
-			}
+	}
+	switch {
+	case d.korkGrant:
+		if problem := korkMembershipProblem(subscriber, d.listID); problem != "" {
+			return listmonkStatusWithheld, problem
 		}
-	} else {
+	case subscriber == nil:
 		result = client.call(ctx, http.MethodPost, "/api/subscribers", map[string]any{
 			"email": normalizeEmail(d.recipient), "name": listmonkSubscriberName(d.recipient), "status": "enabled",
-			"lists": []int64{d.listID}, "preconfirm_subscriptions": true,
+			"lists": []int64{},
 		})
 		if result.err == nil && result.status == http.StatusConflict {
 			// Created concurrently; the next attempt looks it up again.
@@ -502,15 +590,17 @@ func listmonkRetryDelay(attempt int) time.Duration {
 }
 
 // recordListmonkOutcome writes the result only while the row is still the
-// attempt this worker claimed.
+// claim this worker made. The claim token changes on every claim, so a
+// worker that stalled past its lease can't overwrite a later claim, even
+// after a retry reset attempt_count.
 func recordListmonkOutcome(ctx context.Context, db *pgxpool.Pool, d claimedListmonkDelivery, status, code string) error {
 	_, err := db.Exec(ctx, `
 		update announcement_listmonk_deliveries
 		set status = $3, last_error = nullif($4, ''),
 		    accepted_at = case when $3 = 'accepted' then now() else accepted_at end,
 		    next_attempt_at = now() + make_interval(secs => $5), lease_expires_at = null, updated_at = now()
-		where id = $1 and status = 'sending' and attempt_count = $2
-	`, d.id, d.attempt, status, code, listmonkRetryDelay(d.attempt).Seconds())
+		where id = $1 and status = 'sending' and claim_token = $2
+	`, d.id, d.claimToken, status, code, listmonkRetryDelay(d.attempt).Seconds())
 	if err != nil {
 		return errors.New("listmonk delivery outcome write failed")
 	}

@@ -43,6 +43,8 @@ type fakeListmonk struct {
 	txStatus     []int
 	onLookup     func()
 	unauthorized bool
+	creates      int
+	listChanges  int
 }
 
 var fakeListmonkQuery = regexp.MustCompile(`^subscribers\.email = '(.*)'$`)
@@ -99,6 +101,7 @@ func (f *fakeListmonk) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			reply(http.StatusConflict, map[string]string{"message": "E-mail already exists."})
 			return
 		}
+		f.creates++
 		f.nextID++
 		sub := &fakeListmonkSubscriber{id: f.nextID, status: req.Status, lists: map[int64]string{}, created: true}
 		for _, id := range req.Lists {
@@ -116,6 +119,7 @@ func (f *fakeListmonk) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Status  string  `json:"status"`
 		}
 		_ = json.Unmarshal(body, &req)
+		f.listChanges++
 		for _, sub := range f.subscribers {
 			for _, id := range req.IDs {
 				if sub.id == id && req.Action == "add" {
@@ -159,6 +163,33 @@ func (f *fakeListmonk) sends(email string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.tx[normalizeEmail(email)]
+}
+
+// subscribe puts an address in the fake listmonk with one membership of the
+// bound list, as Kork or listmonk's own form would have.
+func (f *fakeListmonk) subscribe(email, status, listStatus string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextID++
+	sub := &fakeListmonkSubscriber{id: 1000 + f.nextID, status: status, lists: map[int64]string{}}
+	if listStatus != "" {
+		sub.lists[syntheticListmonkList] = listStatus
+	}
+	f.subscribers[normalizeEmail(email)] = sub
+}
+
+func (f *fakeListmonk) listMemberships(email string) map[int64]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sub := f.subscribers[normalizeEmail(email)]
+	if sub == nil {
+		return nil
+	}
+	out := map[int64]string{}
+	for id, status := range sub.lists {
+		out[id] = status
+	}
+	return out
 }
 
 func (f *fakeListmonk) totalSends() int {
@@ -326,9 +357,12 @@ func TestListmonkRelayJourney(t *testing.T) {
 	if fx.fake.sends(keep) != 1 || fx.fake.sends(stale) != 0 || fx.fake.sends(fx.email("member")) != 0 {
 		t.Fatalf("sends = %#v", fx.fake.tx)
 	}
+	// A native-grant recipient gets a subscriber record for /api/tx and no
+	// list membership: confirming OS announcements never puts anyone on the
+	// list owner's list.
 	sub := fx.fake.subscribers[normalizeEmail(keep)]
-	if sub == nil || sub.lists[syntheticListmonkList] != "confirmed" || sub.status != "enabled" {
-		t.Fatalf("subscriber = %#v", sub)
+	if sub == nil || !sub.created || len(sub.lists) != 0 || sub.status != "enabled" || fx.fake.listChanges != 0 {
+		t.Fatalf("subscriber = %#v, list changes %d", sub, fx.fake.listChanges)
 	}
 	tx := fx.fake.txBodies[0]
 	data, _ := tx["data"].(map[string]any)
@@ -348,6 +382,10 @@ func TestListmonkRelayJourney(t *testing.T) {
 	var withdrawn bool
 	if err := fx.app.db.QueryRow(t.Context(), `select withdrawn_at is not null from consent_grants where recipient_address = $1`, normalizeEmail(keep)).Scan(&withdrawn); err != nil || !withdrawn {
 		t.Fatalf("withdraw link did not withdraw the grant: %v", err)
+	}
+	// After the OS withdrawal the person is still on no listmonk list.
+	if lists := fx.fake.listMemberships(keep); len(lists) != 0 || fx.fake.listChanges != 0 {
+		t.Fatalf("withdrawn native recipient is on lists %v", lists)
 	}
 }
 
@@ -386,6 +424,7 @@ func TestListmonkKorkReceiptValidation(t *testing.T) {
 		map[string]any{"recipientAddress": fx.email("kork-member"), "receipt": fx.receipt(nil)}, http.StatusForbidden)
 
 	valid := fx.email("kork-valid")
+	fx.fake.subscribe(valid, "enabled", "confirmed")
 	ok := fx.importKork(t, fx.bindingID, valid, fx.receipt(nil), http.StatusOK)
 	if mustObject(t, ok.JSON)["status"] != "verified" {
 		t.Fatalf("import = %#v", ok.JSON)
@@ -398,6 +437,7 @@ func TestListmonkKorkReceiptValidation(t *testing.T) {
 
 	// A receipt that predates a recorded withdrawal never restores consent.
 	withdrawnAddress := fx.email("kork-withdrawn")
+	fx.fake.subscribe(withdrawnAddress, "enabled", "confirmed")
 	grantID := fx.grant(t, withdrawnAddress, syntheticDisclosure)
 	if _, err := fx.app.db.Exec(t.Context(), `update consent_grants set withdrawn_at = now() - interval '10 minutes' where id = $1`, grantID); err != nil {
 		t.Fatal(err)
@@ -408,6 +448,7 @@ func TestListmonkKorkReceiptValidation(t *testing.T) {
 	}
 	// A suppressed address is refused.
 	suppressed := fx.email("kork-suppressed")
+	fx.fake.subscribe(suppressed, "enabled", "confirmed")
 	if _, err := fx.app.db.Exec(t.Context(), `insert into email_suppressions (recipient_email, reason) values ($1, 'email.complained')`, normalizeEmail(suppressed)); err != nil {
 		t.Fatal(err)
 	}
@@ -424,11 +465,16 @@ func TestListmonkKorkReceiptValidation(t *testing.T) {
 	if status, _ := fx.deliveryState(t, id, valid); status != listmonkStatusAccepted || fx.fake.sends(valid) != 1 {
 		t.Fatalf("kork recipient status %s, sends %d", status, fx.fake.sends(valid))
 	}
+	// The relay never created, added or confirmed a Kork subscriber.
+	if fx.fake.creates != 0 || fx.fake.listChanges != 0 {
+		t.Fatalf("relay changed listmonk: creates %d, list changes %d", fx.fake.creates, fx.fake.listChanges)
+	}
 }
 
 func TestListmonkWrongSenderGrantIsRefused(t *testing.T) {
 	fx := newListmonkFixture(t)
 	korkAddress := fx.email("kork-old-binding")
+	fx.fake.subscribe(korkAddress, "enabled", "confirmed")
 	fx.importKork(t, fx.bindingID, korkAddress, fx.receipt(nil), http.StatusOK)
 	// Replace the binding with one for another sender and no Kork policy.
 	postJSON(t, fx.app, fx.ownerCookie, fx.path("/listmonk-bindings/"+fx.bindingID+"/revoke"), map[string]any{}, http.StatusOK)
@@ -491,20 +537,24 @@ func TestListmonkSuppression(t *testing.T) {
 	local := fx.email("suppressed-locally")
 	blocked := fx.email("provider-blocklisted")
 	left := fx.email("provider-unsubscribed")
+	disabled := fx.email("provider-disabled")
 	fx.grant(t, local, syntheticDisclosure)
 	fx.grant(t, blocked, syntheticDisclosure)
+	fx.grant(t, disabled, syntheticDisclosure)
 	leftGrant := fx.grant(t, left, syntheticDisclosure)
 	fx.fake.subscribers[normalizeEmail(blocked)] = &fakeListmonkSubscriber{id: 90, status: "blocklisted", lists: map[int64]string{syntheticListmonkList: "confirmed"}}
 	fx.fake.subscribers[normalizeEmail(left)] = &fakeListmonkSubscriber{id: 91, status: "enabled", lists: map[int64]string{syntheticListmonkList: "unsubscribed"}}
+	// listmonk's "disabled" status suppresses like a blocklist.
+	fx.fake.subscribers[normalizeEmail(disabled)] = &fakeListmonkSubscriber{id: 92, status: "disabled", lists: map[int64]string{}}
 	fx.fake.nextID = 100
 	id, _ := fx.dispatch(t)
 	if _, err := fx.app.db.Exec(t.Context(), `insert into email_suppressions (recipient_email, reason) values ($1, 'email.bounced')`, normalizeEmail(local)); err != nil {
 		t.Fatal(err)
 	}
-	if relay := fx.relay(t); relay.Suppressed != 3 {
+	if relay := fx.relay(t); relay.Suppressed != 4 {
 		t.Fatalf("relay = %+v", relay)
 	}
-	want := map[string]string{local: "suppressed", blocked: "provider_blocklisted", left: "provider_unsubscribed"}
+	want := map[string]string{local: "suppressed", blocked: "provider_blocklisted", left: "provider_unsubscribed", disabled: "provider_disabled"}
 	for recipient, code := range want {
 		if status, got := fx.deliveryState(t, id, recipient); status != listmonkStatusSuppressed || got != code {
 			t.Fatalf("%s: %s/%s", recipient, status, got)
@@ -525,11 +575,19 @@ func TestListmonkSinglePathPerOccurrence(t *testing.T) {
 	both := fx.email("both-paths")
 	fx.grant(t, both, syntheticDisclosure)
 	id, _ := fx.dispatch(t)
-	// The native path cannot gain a row for a listmonk occurrence.
+	// The native path cannot gain a row for a listmonk occurrence: neither
+	// an outbox row (path guard trigger) nor a delivery link (path foreign
+	// key, checked here against an outbox row for another announcement).
+	if _, err := fx.app.db.Exec(t.Context(), `
+		insert into email_outbox (recipient_email, subject, body, related_type, related_id, delivery_status, purpose, workspace_id, expires_at)
+		values ($1, 's', 'b', 'announcement', $2, 'pending', 'announcement', $3, now() + interval '1 hour')`,
+		normalizeEmail(both), id, fx.workspaceID); err == nil {
+		t.Fatal("the native outbox accepted a row for a listmonk occurrence")
+	}
 	var outboxID string
 	if err := fx.app.db.QueryRow(t.Context(), `
 		insert into email_outbox (recipient_email, subject, body, related_type, related_id, delivery_status, purpose, workspace_id, expires_at)
-		values ($1, 's', 'b', 'announcement', $2, 'pending', 'announcement', $3, now() + interval '1 hour') returning id::text`,
+		values ($1, 's', 'b', 'transactional_test', $2, 'held', 'transactional', $3, now() + interval '1 hour') returning id::text`,
 		normalizeEmail(both), id, fx.workspaceID).Scan(&outboxID); err != nil {
 		t.Fatal(err)
 	}
@@ -653,8 +711,8 @@ func TestListmonkHeldWithoutMailDeliveryAndRevocation(t *testing.T) {
 	fx.grant(t, recipient, syntheticDisclosure)
 	fx.app.config.MailDeliveryEnabled = false
 	id, _ := fx.dispatch(t)
-	if relay := fx.relay(t); relay.Claimed != 0 {
-		t.Fatalf("held row was sent: %+v", relay)
+	if relay, err := RunListmonkRelay(t.Context(), fx.app.config, fx.app.db, 10, fx.server.Client()); err == nil || relay.Claimed != 0 {
+		t.Fatalf("relay ran with mail delivery disabled: %+v, %v", relay, err)
 	}
 	if status, _ := fx.deliveryState(t, id, recipient); status != listmonkStatusHeld {
 		t.Fatalf("status = %s", status)
@@ -666,4 +724,282 @@ func TestListmonkHeldWithoutMailDeliveryAndRevocation(t *testing.T) {
 	if fx.fake.totalSends() != 0 {
 		t.Fatal("unexpected send")
 	}
+}
+
+// Finding 1: the receipt proves nothing about the address, so a Kork import
+// needs listmonk to hold the address as a confirmed, enabled member of the
+// bound list, and a caller-chosen "at" never overrides a withdrawal.
+func TestListmonkKorkImportNeedsConfirmedListmonkMembership(t *testing.T) {
+	fx := newListmonkFixture(t)
+	refuse := func(name, recipient string, receipt map[string]any, want int, code string) {
+		t.Helper()
+		if got := fx.importKork(t, fx.bindingID, recipient, receipt, want); mustObject(t, got.JSON)["error"] != code {
+			t.Fatalf("%s: got %#v, want %s", name, got.JSON, code)
+		}
+	}
+	// A forged receipt for an address listmonk has never seen, stamped now.
+	fresh := fx.receipt(map[string]any{"at": time.Now().UTC().Format(time.RFC3339Nano)})
+	refuse("forged", fx.email("kork-forged"), fresh, http.StatusUnprocessableEntity, "listmonk_membership_unconfirmed")
+	// A Kork sign-up that was requested but never confirmed: listmonk holds
+	// the address unconfirmed (or not on this list at all).
+	unconfirmed := fx.email("kork-unconfirmed")
+	fx.fake.subscribe(unconfirmed, "enabled", "unconfirmed")
+	refuse("unconfirmed", unconfirmed, fx.receipt(nil), http.StatusUnprocessableEntity, "listmonk_membership_unconfirmed")
+	otherList := fx.email("kork-other-list")
+	fx.fake.subscribe(otherList, "enabled", "")
+	refuse("not on list", otherList, fresh, http.StatusUnprocessableEntity, "listmonk_membership_unconfirmed")
+	blocked := fx.email("kork-blocklisted")
+	fx.fake.subscribe(blocked, "blocklisted", "confirmed")
+	refuse("blocklisted", blocked, fx.receipt(nil), http.StatusConflict, "listmonk_subscriber_blocked")
+	disabled := fx.email("kork-disabled")
+	fx.fake.subscribe(disabled, "disabled", "confirmed")
+	refuse("disabled", disabled, fx.receipt(nil), http.StatusConflict, "listmonk_subscriber_blocked")
+	left := fx.email("kork-unsubscribed")
+	fx.fake.subscribe(left, "enabled", "unsubscribed")
+	refuse("unsubscribed", left, fx.receipt(nil), http.StatusConflict, "listmonk_unsubscribed")
+
+	// A withdrawal recorded after the binding was created wins over a
+	// freshly stamped receipt, even though "at" is later than it.
+	withdrew := fx.email("kork-withdrew-in-os")
+	fx.fake.subscribe(withdrew, "enabled", "confirmed")
+	grantID := fx.grant(t, withdrew, syntheticDisclosure)
+	if _, err := fx.app.db.Exec(t.Context(), `update consent_grants set withdrawn_at = now(), withdrawal_reason = 'recipient_requested' where id = $1`, grantID); err != nil {
+		t.Fatal(err)
+	}
+	later := fx.receipt(map[string]any{"at": time.Now().Add(2 * time.Minute).UTC().Format(time.RFC3339Nano)})
+	refuse("withdrawn after binding", withdrew, later, http.StatusConflict, "grant_withdrawn")
+
+	var stored int
+	if err := fx.app.db.QueryRow(t.Context(), `select count(*) from consent_grants where workspace_id = $1 and source = 'kork_receipt'`, fx.workspaceID).Scan(&stored); err != nil || stored != 0 {
+		t.Fatalf("refused imports stored %d Kork grants (%v)", stored, err)
+	}
+	if fx.fake.creates != 0 || fx.fake.listChanges != 0 || fx.fake.totalSends() != 0 {
+		t.Fatal("an import changed listmonk")
+	}
+}
+
+// Finding 1 at send time: a Kork grant whose listmonk membership is no longer
+// confirmed is withheld, and the relay never creates or adds the subscriber.
+func TestListmonkKorkSendNeedsConfirmedListmonkMembership(t *testing.T) {
+	fx := newListmonkFixture(t)
+	demoted := fx.email("kork-demoted")
+	removed := fx.email("kork-removed")
+	for _, recipient := range []string{demoted, removed} {
+		fx.fake.subscribe(recipient, "enabled", "confirmed")
+		fx.importKork(t, fx.bindingID, recipient, fx.receipt(nil), http.StatusOK)
+	}
+	id, report := fx.dispatch(t)
+	if report.RecipientsEnqueued != 2 {
+		t.Fatalf("dispatch = %+v", report)
+	}
+	fx.fake.subscribe(demoted, "enabled", "unconfirmed")
+	fx.fake.mu.Lock()
+	delete(fx.fake.subscribers, normalizeEmail(removed))
+	fx.fake.mu.Unlock()
+	if relay := fx.relay(t); relay.Withheld != 2 || relay.Accepted != 0 {
+		t.Fatalf("relay = %+v", relay)
+	}
+	for _, recipient := range []string{demoted, removed} {
+		if status, code := fx.deliveryState(t, id, recipient); status != listmonkStatusWithheld || code != "listmonk_membership_unconfirmed" {
+			t.Fatalf("%s: %s/%s", recipient, status, code)
+		}
+	}
+	if fx.fake.creates != 0 || fx.fake.listChanges != 0 || fx.fake.totalSends() != 0 {
+		t.Fatalf("relay changed listmonk: creates %d, list changes %d, sends %d", fx.fake.creates, fx.fake.listChanges, fx.fake.totalSends())
+	}
+	if lists := fx.fake.listMemberships(demoted); lists[syntheticListmonkList] != "unconfirmed" {
+		t.Fatalf("relay confirmed a subscription: %v", lists)
+	}
+}
+
+// Finding 2: an OS withdrawal never touches listmonk list membership. A
+// native recipient was never on the list; a person who joined through Kork
+// stays on it, because only they or the list owner can change that.
+func TestListmonkOSWithdrawalLeavesListMembershipAlone(t *testing.T) {
+	fx := newListmonkFixture(t)
+	native := fx.email("native-withdraws")
+	kork := fx.email("kork-withdraws")
+	nativeGrant := fx.grant(t, native, syntheticDisclosure)
+	fx.fake.subscribe(kork, "enabled", "confirmed")
+	korkGrant := mustString(t, fx.importKork(t, fx.bindingID, kork, fx.receipt(nil), http.StatusOK).JSON, "id")
+	fx.dispatch(t)
+	if relay := fx.relay(t); relay.Accepted != 2 {
+		t.Fatalf("relay = %+v", relay)
+	}
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/consent-grants/"+nativeGrant+"/withdraw"), map[string]any{}, http.StatusOK)
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/consent-grants/"+korkGrant+"/withdraw"), map[string]any{}, http.StatusOK)
+	if lists := fx.fake.listMemberships(native); len(lists) != 0 {
+		t.Fatalf("native recipient is on lists %v", lists)
+	}
+	if lists := fx.fake.listMemberships(kork); lists[syntheticListmonkList] != "confirmed" {
+		t.Fatalf("Kork subscriber's own membership changed: %v", lists)
+	}
+	if fx.fake.listChanges != 0 {
+		t.Fatalf("list changes = %d", fx.fake.listChanges)
+	}
+	// Nothing is sent to either after the withdrawal.
+	fx.dispatch(t)
+	fx.relay(t)
+	if fx.fake.sends(native) != 1 || fx.fake.sends(kork) != 1 {
+		t.Fatalf("sends after withdrawal = %#v", fx.fake.tx)
+	}
+}
+
+// Finding 3: MAIL_DELIVERY_ENABLED stops the relay at send time, including
+// rows already pending and rows an organizer requeued.
+func TestListmonkKillSwitchAtRelayTime(t *testing.T) {
+	fx := newListmonkFixture(t)
+	pending := fx.email("kill-pending")
+	fx.grant(t, pending, syntheticDisclosure)
+	id, _ := fx.dispatch(t)
+	fx.app.config.MailDeliveryEnabled = false
+	if _, err := RunListmonkRelay(t.Context(), fx.app.config, fx.app.db, 10, fx.server.Client()); err == nil {
+		t.Fatal("relay ran with mail delivery disabled")
+	}
+	if status, _ := fx.deliveryState(t, id, pending); status != listmonkStatusPending || fx.fake.totalSends() != 0 {
+		t.Fatalf("pending row after kill switch: %s, sends %d", status, fx.fake.totalSends())
+	}
+	// A requeued uncertain row stays put too.
+	fx.app.config.MailDeliveryEnabled = true
+	fx.fake.txStatus = []int{http.StatusInternalServerError}
+	fx.relay(t)
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/announcements/"+id+"/listmonk-deliveries/retry"), map[string]any{}, http.StatusOK)
+	fx.app.config.MailDeliveryEnabled = false
+	if _, err := RunListmonkRelay(t.Context(), fx.app.config, fx.app.db, 10, fx.server.Client()); err == nil {
+		t.Fatal("relay ran a retry with mail delivery disabled")
+	}
+	if status, _ := fx.deliveryState(t, id, pending); status != listmonkStatusPending || fx.fake.sends(pending) != 1 {
+		t.Fatalf("requeued row after kill switch: %s, sends %d", status, fx.fake.sends(pending))
+	}
+}
+
+// A grant recorded in another workspace never reaches this workspace's
+// listmonk path, and a binding can't be used through another workspace.
+func TestListmonkGrantFromAnotherWorkspace(t *testing.T) {
+	fx := newListmonkFixture(t)
+	other := postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces", map[string]any{"name": "Other Collective"}, http.StatusOK)
+	otherID := mustString(t, other.JSON, "id")
+	recipient := fx.email("other-workspace")
+	otherGrant, _ := insertConsentGrant(t, fx.lifecycleFixture, otherID, recipient, consentPurposeAnnouncement, "explicit_form", true)
+	if _, err := fx.app.db.Exec(t.Context(), `update consent_grants set disclosure_version = $2 where id = $1`, otherGrant, syntheticDisclosure); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkListmonkGrant(t.Context(), fx.app.db, otherGrant, fx.bindingID, recipient); err != ErrConsentGrantRequired {
+		t.Fatalf("another workspace's grant passed the listmonk check: %v", err)
+	}
+	fx.fake.subscribe(recipient, "enabled", "confirmed")
+	postJSON(t, fx.app, fx.ownerCookie, "/api/workspaces/"+otherID+"/listmonk-bindings/"+fx.bindingID+"/kork-grants",
+		map[string]any{"recipientAddress": recipient, "receipt": fx.receipt(nil)}, http.StatusNotFound)
+	_, report := fx.dispatch(t)
+	if report.RecipientsEnqueued != 0 {
+		t.Fatalf("dispatch used another workspace's grant: %+v", report)
+	}
+	fx.relay(t)
+	if fx.fake.totalSends() != 0 {
+		t.Fatal("another workspace's grant reached /api/tx")
+	}
+}
+
+// Finding 4: Kork grants are withdrawn when their binding is revoked, don't
+// block native consent, and a revoke-withdrawal doesn't block a later import
+// for a new binding.
+func TestListmonkKorkGrantsAndNativeConsentCoexist(t *testing.T) {
+	fx := newListmonkFixture(t)
+	both := fx.email("kork-and-native")
+	fx.fake.subscribe(both, "enabled", "confirmed")
+	korkGrant := mustString(t, fx.importKork(t, fx.bindingID, both, fx.receipt(nil), http.StatusOK).JSON, "id")
+	native := postJSON(t, fx.app, fx.ownerCookie, fx.path("/consent-grants"), map[string]any{
+		"channel": "email", "recipientAddress": both, "purpose": consentPurposeAnnouncement, "disclosureVersion": syntheticDisclosure, "source": "explicit_form",
+	}, http.StatusOK)
+	nativeGrant := mustString(t, native.JSON, "id")
+
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/listmonk-bindings/"+fx.bindingID+"/revoke"), map[string]any{}, http.StatusOK)
+	var korkWithdrawn bool
+	var reason *string
+	if err := fx.app.db.QueryRow(t.Context(), `select withdrawn_at is not null, withdrawal_reason from consent_grants where id = $1`, korkGrant).Scan(&korkWithdrawn, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if !korkWithdrawn || reason == nil || *reason != korkBindingRevokedReason {
+		t.Fatalf("Kork grant after revoke: withdrawn %v, reason %v", korkWithdrawn, reason)
+	}
+	var nativeActive bool
+	if err := fx.app.db.QueryRow(t.Context(), `select withdrawn_at is null from consent_grants where id = $1`, nativeGrant).Scan(&nativeActive); err != nil || !nativeActive {
+		t.Fatalf("revoke touched the native grant: %v", err)
+	}
+	// A native grant can still be recorded for an address whose Kork grant
+	// was withdrawn by the revoke.
+	second := fx.email("native-after-revoke")
+	fx.fake.subscribe(second, "enabled", "confirmed")
+	replacement := postJSON(t, fx.app, fx.ownerCookie, fx.path("/listmonk-bindings"), map[string]any{
+		"label": "Replacement", "listId": syntheticListmonkList, "templateId": 3, "senderAddress": "news@example.test",
+		"disclosureVersion": syntheticDisclosure, "korkPolicy": korkPolicy(),
+	}, http.StatusCreated)
+	replacementID := mustString(t, replacement.JSON, "id")
+	// The revoke-withdrawal was not the person's decision, so the same
+	// address can be imported for the new binding.
+	fx.importKork(t, replacementID, both, fx.receipt(nil), http.StatusOK)
+	fx.importKork(t, replacementID, second, fx.receipt(nil), http.StatusOK)
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/consent-grants"), map[string]any{
+		"channel": "email", "recipientAddress": second, "purpose": consentPurposeAnnouncement, "disclosureVersion": syntheticDisclosure, "source": "explicit_form",
+	}, http.StatusOK)
+
+	// One OS withdrawal ends every announcement grant the address holds here.
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/consent-grants/"+nativeGrant+"/withdraw"), map[string]any{}, http.StatusOK)
+	var active int
+	if err := fx.app.db.QueryRow(t.Context(), `select count(*) from consent_grants where workspace_id = $1 and recipient_address = $2 and withdrawn_at is null`,
+		fx.workspaceID, normalizeEmail(both)).Scan(&active); err != nil || active != 0 {
+		t.Fatalf("active grants after withdrawal = %d (%v)", active, err)
+	}
+}
+
+// Finding 6: a worker that stalled past its lease can't write over a later
+// claim of the same row, even after a retry reset attempt_count.
+func TestListmonkStaleOutcomeCannotOverwriteNewClaim(t *testing.T) {
+	fx := newListmonkFixture(t)
+	recipient := fx.email("stale-claim")
+	fx.grant(t, recipient, syntheticDisclosure)
+	id, _ := fx.dispatch(t)
+	var deliveryID, current string
+	if err := fx.app.db.QueryRow(t.Context(), `
+		update announcement_listmonk_deliveries set status = 'sending', attempt_count = 1, claim_token = gen_random_uuid(),
+		  lease_expires_at = now() + interval '2 minutes'
+		where announcement_id = $1 returning id::text, claim_token::text`, id).Scan(&deliveryID, &current); err != nil {
+		t.Fatal(err)
+	}
+	stale := claimedListmonkDelivery{id: deliveryID, claimToken: "00000000-0000-4000-8000-000000000000", attempt: 1}
+	if err := recordListmonkOutcome(t.Context(), fx.app.db, stale, listmonkStatusAccepted, ""); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := fx.deliveryState(t, id, recipient); status != listmonkStatusSending {
+		t.Fatalf("stale outcome overwrote the current claim: %s", status)
+	}
+	live := claimedListmonkDelivery{id: deliveryID, claimToken: current, attempt: 1}
+	if err := recordListmonkOutcome(t.Context(), fx.app.db, live, listmonkStatusUncertain, "listmonk_no_response"); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := fx.deliveryState(t, id, recipient); status != listmonkStatusUncertain {
+		t.Fatalf("current claim's outcome = %s", status)
+	}
+}
+
+// Finding 5: the binding normalizes its Kork list URL the way Kork does, so
+// a URL whose path has capitals still matches Kork's receipt.
+func TestListmonkKorkPolicyURLMatchesKorkNormalization(t *testing.T) {
+	fx := newListmonkFixture(t)
+	postJSON(t, fx.app, fx.ownerCookie, fx.path("/listmonk-bindings/"+fx.bindingID+"/revoke"), map[string]any{}, http.StatusOK)
+	policy := korkPolicy()
+	policy["listUrl"] = "  HTTPS://Lists.Example.TEST/Newsletter/  "
+	created := postJSON(t, fx.app, fx.ownerCookie, fx.path("/listmonk-bindings"), map[string]any{
+		"label": "Path", "listId": syntheticListmonkList, "templateId": 3, "senderAddress": "news@example.test",
+		"disclosureVersion": syntheticDisclosure, "korkPolicy": policy,
+	}, http.StatusCreated)
+	bindingID := mustString(t, created.JSON, "id")
+	stored, _ := mustObject(t, created.JSON)["korkPolicy"].(map[string]any)
+	if stored["listUrl"] != "https://lists.example.test/Newsletter" {
+		t.Fatalf("stored list URL = %v", stored["listUrl"])
+	}
+	recipient := fx.email("kork-path")
+	fx.fake.subscribe(recipient, "enabled", "confirmed")
+	receipt := fx.receipt(map[string]any{"list": "listmonk:https://lists.example.test/Newsletter#" + strconv.Itoa(syntheticListmonkList)})
+	fx.importKork(t, bindingID, recipient, receipt, http.StatusOK)
 }
