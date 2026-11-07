@@ -1,0 +1,116 @@
+{
+  "$comment": "Synthetic Backline handoff v1 examples and signature vectors. See docs/development/backline-handoff.md. Not production identifiers or secrets.",
+  "publish": {
+    "version": 1,
+    "kind": "subcult-os.announcement-handoff",
+    "operation": "publish",
+    "occurrenceKey": "subcult-os/announcement/2f0e6f53-6b51-4b6e-9a39-6d2c1d1f5a10/binding/8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41",
+    "contentRevision": "sha256:64de58502943bcb7b0b7441d4e952e5d7a744196df7fd1be4b17713f00f87289",
+    "binding": {
+      "id": "8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41",
+      "serverId": "112233445566778899",
+      "channelId": "998877665544332211"
+    },
+    "deliverAt": "2026-11-08T18:00:00Z",
+    "expiresAt": "2026-11-09T18:00:00Z",
+    "mentionPolicy": "none",
+    "content": {
+      "subject": "Doors move to 8pm",
+      "body": "Synthetic fixture announcement."
+    },
+    "sentAt": "2026-11-07T12:00:00Z"
+  },
+  "cancel": {
+    "version": 1,
+    "kind": "subcult-os.announcement-handoff",
+    "operation": "cancel",
+    "occurrenceKey": "subcult-os/announcement/2f0e6f53-6b51-4b6e-9a39-6d2c1d1f5a10/binding/8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41",
+    "contentRevision": "sha256:64de58502943bcb7b0b7441d4e952e5d7a744196df7fd1be4b17713f00f87289",
+    "binding": {
+      "id": "8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41",
+      "serverId": "112233445566778899",
+      "channelId": "998877665544332211"
+    },
+    "deliverAt": "2026-11-08T18:00:00Z",
+    "expiresAt": "2026-11-09T18:00:00Z",
+    "mentionPolicy": "none",
+    "sentAt": "2026-11-07T12:05:00Z"
+  },
+  "acknowledgements": {
+    "publish": [
+      {
+        "version": 1,
+        "occurrenceKey": "subcult-os/announcement/2f0e6f53-6b51-4b6e-9a39-6d2c1d1f5a10/binding/8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41",
+        "status": "accepted",
+        "receiverReference": "backline-job-123"
+      },
+      {
+        "version": 1,
+        "occurrenceKey": "subcult-os/announcement/2f0e6f53-6b51-4b6e-9a39-6d2c1d1f5a10/binding/8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41",
+        "status": "duplicate"
+      }
+    ],
+    "cancel": [
+      {
+        "version": 1,
+        "occurrenceKey": "subcult-os/announcement/2f0e6f53-6b51-4b6e-9a39-6d2c1d1f5a10/binding/8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41",
+        "status": "cancelled"
+      },
+      {
+        "version": 1,
+        "occurrenceKey": "subcult-os/announcement/2f0e6f53-6b51-4b6e-9a39-6d2c1d1f5a10/binding/8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41",
+        "status": "not_found"
+      },
+      {
+        "version": 1,
+        "occurrenceKey": "subcult-os/announcement/2f0e6f53-6b51-4b6e-9a39-6d2c1d1f5a10/binding/8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41",
+        "status": "already_delivered"
+      }
+    ]
+  },
+  "rejection": {
+    "status": 409,
+    "body": {
+      "error": "binding_revoked"
+    }
+  },
+  "receipt": {
+    "version": 1,
+    "kind": "subcult-os.announcement-receipt",
+    "occurrenceKey": "subcult-os/announcement/2f0e6f53-6b51-4b6e-9a39-6d2c1d1f5a10/binding/8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41",
+    "contentRevision": "sha256:64de58502943bcb7b0b7441d4e952e5d7a744196df7fd1be4b17713f00f87289",
+    "outcome": "delivered",
+    "receiverReference": "backline-job-123"
+  },
+  "forbiddenKeys": [
+    "email",
+    "emails",
+    "recipient",
+    "recipients",
+    "recipientAddress",
+    "audience",
+    "members",
+    "membership",
+    "consent",
+    "address",
+    "phone",
+    "workspaceId",
+    "personId"
+  ],
+  "signatureVectors": [
+    {
+      "scope": "handoff",
+      "secret": "fixture-secret-not-for-production-0123456789",
+      "timestamp": 1794052800,
+      "body": "{\"version\":1,\"kind\":\"subcult-os.announcement-handoff\",\"operation\":\"publish\",\"occurrenceKey\":\"subcult-os/announcement/2f0e6f53-6b51-4b6e-9a39-6d2c1d1f5a10/binding/8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41\",\"contentRevision\":\"sha256:64de58502943bcb7b0b7441d4e952e5d7a744196df7fd1be4b17713f00f87289\",\"binding\":{\"id\":\"8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41\",\"serverId\":\"112233445566778899\",\"channelId\":\"998877665544332211\"},\"deliverAt\":\"2026-11-08T18:00:00Z\",\"expiresAt\":\"2026-11-09T18:00:00Z\",\"mentionPolicy\":\"none\",\"content\":{\"subject\":\"Doors move to 8pm\",\"body\":\"Synthetic fixture announcement.\"},\"sentAt\":\"2026-11-07T12:00:00Z\"}",
+      "signature": "v1=8100973d0b8f7629abaddd3396666bc607ba25908f506fb155977041d498b9c0"
+    },
+    {
+      "scope": "receipt",
+      "secret": "fixture-secret-not-for-production-0123456789",
+      "timestamp": 1794052800,
+      "body": "{\"version\":1,\"kind\":\"subcult-os.announcement-receipt\",\"occurrenceKey\":\"subcult-os/announcement/2f0e6f53-6b51-4b6e-9a39-6d2c1d1f5a10/binding/8d3c4b1e-0c4f-4f0a-9d0e-3b7f6a2c9e41\",\"contentRevision\":\"sha256:64de58502943bcb7b0b7441d4e952e5d7a744196df7fd1be4b17713f00f87289\",\"outcome\":\"delivered\",\"receiverReference\":\"backline-job-123\"}",
+      "signature": "v1=8afcf7e078b81dd26b0fad84c904e4dc8ae259fa1580c8a8af71173fc3988293"
+    }
+  ]
+}

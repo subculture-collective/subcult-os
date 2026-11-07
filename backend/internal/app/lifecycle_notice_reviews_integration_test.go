@@ -109,7 +109,7 @@ func TestLifecycleNoticeReviewMigrationPreservesApprovedQueue(t *testing.T) {
 	if err := fx.app.db.QueryRow(t.Context(), `select jsonb_agg(to_jsonb(e) order by e.id)::text from email_outbox e`).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fx.app.db.Exec(t.Context(), `alter table email_outbox drop constraint email_outbox_provider_id_length; alter table email_provider_events drop constraint email_events_provider_id_length; alter table email_outbox drop column provider; alter table email_outbox alter column provider_message_id type uuid using provider_message_id::uuid; alter table email_provider_events alter column provider_message_id type uuid using provider_message_id::uuid; drop table venue_access_place_requests;drop table event_access_revisions; drop table lifecycle_notice_reviews; delete from schema_migrations where version>=27`); err != nil {
+	if _, err := fx.app.db.Exec(t.Context(), `drop table announcement_channel_handoffs; drop table announcement_channel_bindings; alter table announcements drop constraint announcements_id_workspace_key; alter table email_outbox drop constraint email_outbox_provider_id_length; alter table email_provider_events drop constraint email_events_provider_id_length; alter table email_outbox drop column provider; alter table email_outbox alter column provider_message_id type uuid using provider_message_id::uuid; alter table email_provider_events alter column provider_message_id type uuid using provider_message_id::uuid; drop table venue_access_place_requests;drop table event_access_revisions; drop table lifecycle_notice_reviews; delete from schema_migrations where version>=27`); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {

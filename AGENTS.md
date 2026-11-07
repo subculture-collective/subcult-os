@@ -29,6 +29,8 @@ The optional `atproto-projection` profile runs `atproto-project -run`, an allowl
 
 The optional `announcement-workers` profile runs `email-deliver -announce -watch` (see `docs/development/announcements.md`, SIGNAL-01). It only claims due scheduled announcements and enqueues their recipient `email_outbox` rows from the existing `consent_grants` audience, minus suppression; it never contacts the mail provider and does not require `MAIL_DELIVERY_ENABLED`. Actual sending of the rows it enqueues still goes through the `mail-workers` profile and remains subject to `MAIL_DELIVERY_ENABLED`. Email remains the only implemented announcement channel; do not add an SMS or other provider without a documented pilot need and cost basis.
 
+The optional `backline-workers` profile runs `backline-handoff -watch`, which delivers approved announcement handoffs to one connected Backline channel (see `docs/development/backline-handoff.md`, #221). It requires `BACKLINE_HANDOFF_URL` and `BACKLINE_HANDOFF_SECRET`; both default to empty and the worker refuses to run without them. Test against the synthetic receiver only; never point automated qualification at a real Backline or Discord channel.
+
 ## Verification
 
 For isolated T3 development, use `bash scripts/dev-env.sh start` and the printed

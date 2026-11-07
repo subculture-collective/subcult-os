@@ -50,6 +50,8 @@ const (
 	permManageConsent       = "manage_consent"       // create/list/withdraw channel consent grants (CONSENT-01)
 	permManageAnnouncements = "manage_announcements" // create/schedule/cancel/list announcements (SIGNAL-01)
 	permManageImports       = "manage_imports"       // create review-only cultural import previews (IMPORT-01)
+	// connect or revoke an external announcement channel binding (#221)
+	permManageChannelBindings = "manage_channel_bindings"
 )
 
 // rolePermissions is the least-privilege permission matrix. Every role
@@ -57,23 +59,25 @@ const (
 // role a workspace member at all. Everything else is additive per role.
 var rolePermissions = map[string]map[string]bool{
 	roleOwner: {
-		permOperate:             true,
-		permManageMembers:       true,
-		permManageDelegations:   true,
-		permPublish:             true,
-		permFinance:             true,
-		permDoor:                true,
-		permManageConsent:       true,
-		permManageAnnouncements: true,
-		permManageImports:       true,
+		permOperate:               true,
+		permManageMembers:         true,
+		permManageDelegations:     true,
+		permPublish:               true,
+		permFinance:               true,
+		permDoor:                  true,
+		permManageConsent:         true,
+		permManageAnnouncements:   true,
+		permManageImports:         true,
+		permManageChannelBindings: true,
 	},
 	roleOrganizer: {
-		permOperate:             true,
-		permManageDelegations:   true,
-		permPublish:             true,
-		permManageConsent:       true,
-		permManageAnnouncements: true,
-		permManageImports:       true,
+		permOperate:               true,
+		permManageDelegations:     true,
+		permPublish:               true,
+		permManageConsent:         true,
+		permManageAnnouncements:   true,
+		permManageImports:         true,
+		permManageChannelBindings: true,
 	},
 	roleFinance: {
 		permOperate: true,

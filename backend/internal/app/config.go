@@ -63,6 +63,11 @@ type Config struct {
 	// docs/development/announcements.md.
 	AnnouncementUnitCostCents    int
 	announcementUnitCostCentsRaw string
+	// BacklineHandoffURL and BacklineHandoffSecret enable the opt-in Backline
+	// announcement handoff (docs/development/backline-handoff.md). Both empty
+	// by default; nothing is sent or accepted unless both are set.
+	BacklineHandoffURL    string
+	BacklineHandoffSecret string
 	// Native app link verification. Each list is empty unless configured, and
 	// the matching /.well-known document is served only when it is set.
 	MobileAppleAppIDs             []string
@@ -79,6 +84,8 @@ func LoadConfig() Config {
 	announcementUnitCostCents, _ := strconv.Atoi(announcementUnitCostCentsRaw)
 	return Config{
 		AnnouncementUnitCostCents:     announcementUnitCostCents,
+		BacklineHandoffURL:            strings.TrimSpace(env("BACKLINE_HANDOFF_URL", "")),
+		BacklineHandoffSecret:         env("BACKLINE_HANDOFF_SECRET", ""),
 		announcementUnitCostCentsRaw:  announcementUnitCostCentsRaw,
 		ATProjectionEnabled:           parseEnvBool(atProjectionEnabledRaw),
 		atProjectionEnabledRaw:        atProjectionEnabledRaw,
@@ -205,6 +212,7 @@ func (c Config) Validate() error {
 			problems = append(problems, "ANNOUNCEMENT_UNIT_COST_CENTS must be a non-negative integer")
 		}
 	}
+	problems = append(problems, c.backlineHandoffProblems()...)
 	problems = append(problems, c.appLinkProblems()...)
 	if strings.TrimSpace(c.Addr) == "" {
 		problems = append(problems, "API_ADDR is required")
@@ -252,6 +260,29 @@ func (c Config) Validate() error {
 		return fmt.Errorf("invalid config: %s", strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+func (c Config) backlineHandoffProblems() []string {
+	rawURL, secret := strings.TrimSpace(c.BacklineHandoffURL), c.BacklineHandoffSecret
+	if rawURL == "" && secret == "" {
+		return nil
+	}
+	var problems []string
+	if rawURL == "" || secret == "" {
+		problems = append(problems, "BACKLINE_HANDOFF_URL and BACKLINE_HANDOFF_SECRET must be set together")
+	}
+	if secret != "" && (len(secret) < 32 || strings.IndexFunc(secret, unicode.IsSpace) >= 0) {
+		problems = append(problems, "BACKLINE_HANDOFF_SECRET must be at least 32 characters without whitespace")
+	}
+	if rawURL != "" {
+		parsed, err := url.Parse(rawURL)
+		production := strings.EqualFold(strings.TrimSpace(c.AppEnv), "production")
+		if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" ||
+			(parsed.Scheme != "https" && (production || parsed.Scheme != "http")) {
+			problems = append(problems, "BACKLINE_HANDOFF_URL must be an absolute HTTPS URL (HTTP only outside production)")
+		}
+	}
+	return problems
 }
 
 func (c Config) atprotoOAuthSettings() atprotocol.OAuthClientSettings {

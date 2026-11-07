@@ -222,7 +222,7 @@ func TestEventAccessMigrationPreservesExistingState(t *testing.T) {
 	if err := fx.app.db.QueryRow(t.Context(), `select to_jsonb(e)::text from events e where id=$1`, id).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fx.app.db.Exec(t.Context(), `alter table email_outbox drop constraint email_outbox_provider_id_length; alter table email_provider_events drop constraint email_events_provider_id_length; alter table email_outbox drop column provider; alter table email_outbox alter column provider_message_id type uuid using provider_message_id::uuid; alter table email_provider_events alter column provider_message_id type uuid using provider_message_id::uuid; drop table venue_access_place_requests;drop table event_access_revisions;delete from schema_migrations where version>=28`); err != nil {
+	if _, err := fx.app.db.Exec(t.Context(), `drop table announcement_channel_handoffs; drop table announcement_channel_bindings; alter table announcements drop constraint announcements_id_workspace_key; alter table email_outbox drop constraint email_outbox_provider_id_length; alter table email_provider_events drop constraint email_events_provider_id_length; alter table email_outbox drop column provider; alter table email_outbox alter column provider_message_id type uuid using provider_message_id::uuid; alter table email_provider_events alter column provider_message_id type uuid using provider_message_id::uuid; drop table venue_access_place_requests;drop table event_access_revisions;delete from schema_migrations where version>=28`); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {

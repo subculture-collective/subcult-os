@@ -54,6 +54,8 @@ services:
       AT_PROJECTION_SOURCE_URL: ${AT_PROJECTION_SOURCE_URL:-}
       EXTERNAL_TICKET_ALLOWED_HOSTS: ${EXTERNAL_TICKET_ALLOWED_HOSTS:-}
       ANNOUNCEMENT_UNIT_COST_CENTS: ${ANNOUNCEMENT_UNIT_COST_CENTS:-0}
+      BACKLINE_HANDOFF_URL: ${BACKLINE_HANDOFF_URL:-}
+      BACKLINE_HANDOFF_SECRET: ${BACKLINE_HANDOFF_SECRET:-}
       MOBILE_APPLE_APP_IDS: ${MOBILE_APPLE_APP_IDS:-}
       MOBILE_ANDROID_PACKAGE: ${MOBILE_ANDROID_PACKAGE:-}
       MOBILE_ANDROID_CERT_SHA256: ${MOBILE_ANDROID_CERT_SHA256:-}
@@ -88,6 +90,16 @@ services:
     profiles: [announcement-workers]
     build: ./backend
     command: ["/app/email-deliver", "-announce", "-watch"]
+    environment: *api_environment
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+
+  backline-handoffs:
+    profiles: [backline-workers]
+    build: ./backend
+    command: ["/app/backline-handoff", "-watch"]
     environment: *api_environment
     restart: unless-stopped
     depends_on:

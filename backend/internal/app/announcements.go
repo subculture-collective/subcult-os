@@ -41,6 +41,8 @@ type announcementDTO struct {
 	CreatedAt            string         `json:"createdAt"`
 	UpdatedAt            string         `json:"updatedAt"`
 	DeliveryStatusCounts map[string]int `json:"deliveryStatusCounts"`
+	// ChannelHandoffs is the Backline half of the outcome ledger (#221).
+	ChannelHandoffs []channelHandoffDTO `json:"channelHandoffs"`
 }
 
 type announcementPreviewDTO struct {
@@ -201,13 +203,47 @@ func (a *App) handleScheduleAnnouncement(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	result, err := a.db.Exec(r.Context(), `
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not schedule announcement")
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	result, err := tx.Exec(r.Context(), `
 		update announcements set status = $3, scheduled_for = $4, updated_at = now()
 		where id = $1 and workspace_id = $2 and status in ($5, $3)
 	`, announcementID, workspaceID, announcementStatusScheduled, scheduledFor.UTC(), announcementStatusDraft)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not schedule announcement")
 		return
+	}
+	if result.RowsAffected() == 1 {
+		// A Backline handoff the receiver may already hold keeps its time;
+		// one it has not seen follows the new schedule.
+		var sent bool
+		if err := tx.QueryRow(r.Context(), `
+			select exists(select 1 from announcement_channel_handoffs where announcement_id = $1
+			  and not (operation = 'publish' and status in ('pending', 'cancelled', 'rejected', 'expired')))
+		`, announcementID).Scan(&sent); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not schedule announcement")
+			return
+		}
+		if sent {
+			writeError(w, http.StatusConflict, "announcement was already handed off to Backline; cancel it and draft a new one")
+			return
+		}
+		if _, err := tx.Exec(r.Context(), `
+			update announcement_channel_handoffs
+			set deliver_at = $2, expires_at = $2::timestamptz + make_interval(secs => $3), updated_at = now()
+			where announcement_id = $1 and operation = 'publish' and status = 'pending'
+		`, announcementID, scheduledFor.UTC().Truncate(time.Second), backlineDeliveryWindow.Seconds()); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not schedule announcement")
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not schedule announcement")
+			return
+		}
 	}
 	if result.RowsAffected() == 0 {
 		if _, loadErr := a.loadAnnouncementDTO(r.Context(), workspaceID, announcementID); errors.Is(loadErr, errAnnouncementNotFound) {
@@ -243,7 +279,13 @@ func (a *App) handleCancelAnnouncement(w http.ResponseWriter, r *http.Request) {
 	}
 	announcementID := r.PathValue("announcementID")
 
-	result, err := a.db.Exec(r.Context(), `
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not cancel announcement")
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	result, err := tx.Exec(r.Context(), `
 		update announcements
 		set status = $3, cancelled_at = now(), cancelled_by_person_id = $4, updated_at = now()
 		where id = $1 and workspace_id = $2 and status in ($5, $6)
@@ -251,6 +293,18 @@ func (a *App) handleCancelAnnouncement(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not cancel announcement")
 		return
+	}
+	if result.RowsAffected() == 1 {
+		// Withdraw Backline handoffs in the same transaction: unsent ones are
+		// cancelled locally, sent ones become cancel messages.
+		if err := requestHandoffCancellation(r.Context(), tx, "announcement_id", announcementID); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not cancel announcement")
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not cancel announcement")
+			return
+		}
 	}
 	if result.RowsAffected() == 0 {
 		if _, loadErr := a.loadAnnouncementDTO(r.Context(), workspaceID, announcementID); errors.Is(loadErr, errAnnouncementNotFound) {
@@ -385,6 +439,10 @@ func (a *App) loadAnnouncementDTO(ctx context.Context, workspaceID, announcement
 		dto.DeliveryStatusCounts[status] = count
 	}
 	if err := rows.Err(); err != nil {
+		return announcementDTO{}, err
+	}
+	rows.Close()
+	if dto.ChannelHandoffs, err = a.loadAnnouncementHandoffs(ctx, announcementID); err != nil {
 		return announcementDTO{}, err
 	}
 	return dto, nil

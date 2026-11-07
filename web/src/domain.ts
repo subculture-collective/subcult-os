@@ -775,3 +775,67 @@ export interface OccurrenceAccessComparisonDTO {
   event: EventAccessWorksheetDTO;
   venue: VenueAccessWorksheetDTO | null;
 }
+
+export type AnnouncementStatus = 'draft' | 'scheduled' | 'cancelled' | 'dispatching' | 'dispatched';
+export type ChannelHandoffStatus = 'pending' | 'sending' | 'accepted' | 'rejected' | 'uncertain' | 'failed' | 'cancelled' | 'expired';
+export interface ChannelBindingDTO {
+  id: string;
+  channel: 'backline';
+  label: string;
+  serverId: string;
+  channelId: string;
+  mentionPolicy: 'none';
+  active: boolean;
+  createdAt: string;
+  revokedAt?: string;
+}
+export interface ChannelHandoffDTO {
+  id: string;
+  bindingId: string;
+  bindingLabel: string;
+  occurrenceKey: string;
+  contentRevision: string;
+  operation: 'publish' | 'cancel';
+  status: ChannelHandoffStatus;
+  attemptCount: number;
+  lastError?: string;
+  receiverStatus?: string;
+  receiverReference?: string;
+  deliverAt: string;
+  expiresAt: string;
+  acknowledgedAt?: string;
+  cancelRequestedAt?: string;
+  deliveryOutcome?: 'delivered' | 'failed' | 'uncertain' | 'cancelled';
+  deliveryOutcomeAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface AnnouncementDTO {
+  id: string;
+  subject: string;
+  body: string;
+  status: AnnouncementStatus;
+  scheduledFor?: string;
+  createdAt: string;
+  updatedAt: string;
+  deliveryStatusCounts: Record<string, number>;
+  channelHandoffs: ChannelHandoffDTO[];
+}
+export type BacklineHandoffBlocker = 'announcement_not_approved' | 'no_active_binding' | 'content_too_long' | 'adapter_not_configured' | 'already_handed_off';
+export interface BacklinePreviewDTO {
+  announcementId: string;
+  announcementStatus: AnnouncementStatus;
+  approved: boolean;
+  subject: string;
+  body: string;
+  contentRevision: string;
+  contentLength: number;
+  contentLimit: number;
+  mentionPolicy: 'none';
+  deliverAt: string;
+  expiresAt: string;
+  adapterConfigured: boolean;
+  binding: ChannelBindingDTO | null;
+  handoff: ChannelHandoffDTO | null;
+  blockers: BacklineHandoffBlocker[];
+}

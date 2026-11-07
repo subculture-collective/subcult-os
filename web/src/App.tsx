@@ -16,6 +16,7 @@ import { ImportView } from './views/ImportView';
 import { LifecycleIntentsView } from './views/LifecycleIntentsView';
 import { VenueAccessIndexView } from './views/VenueAccessIndexView';
 import { DesignSystemView } from './views/DesignSystemView';
+import { AnnouncementChannelsView } from './views/AnnouncementChannelsView';
 
 function getPathname() {
   if (typeof window === 'undefined') {
@@ -78,6 +79,7 @@ export default function App() {
 
   if (/^\/workspace\/[^/]+\/members$/.test(pathname)) return <MemberRolesView key={getSegment(pathname, 2)} workspaceId={getSegment(pathname, 2)} />;
   if (/^\/workspace\/[^/]+\/places\/[^/]+\/access-info$/.test(pathname)) return <VenueAccessView workspaceId={getSegment(pathname, 2)} placeId={getSegment(pathname, 4)} />;
+  if (/^\/workspace\/[^/]+\/announcements$/.test(pathname)) return <AnnouncementChannelsView key={getSegment(pathname, 2)} workspaceId={getSegment(pathname, 2)} />;
   if (/^\/workspace\/[^/]+\/venue-access$/.test(pathname)) return <VenueAccessIndexView key={getSegment(pathname, 2)} workspaceId={getSegment(pathname, 2)} />;
 
   if (pathname.startsWith('/workspace/') && pathname.endsWith('/cultural-imports')) {

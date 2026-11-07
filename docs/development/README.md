@@ -20,6 +20,7 @@ This directory converts the Subcult research and funding work into an engineerin
 - [Mobile app links for identity email](mobile-app-links.md)
 - [Private archive approvals](public-archive.md)
 - [Private external ticket handoffs](external-ticket-handoffs.md)
+- [Backline announcement handoff](backline-handoff.md)
 - [Legacy Subcults replacement runbook](../runbooks/subcults-cutover.md)
 - [Superseded bridge contract](bridge-contract.md)
 - [User journeys and UI acceptance](journeys.md)

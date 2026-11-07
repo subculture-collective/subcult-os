@@ -2110,3 +2110,19 @@ Documentation only; no code, schema or contract changed.
   currently required for EXPORT-01 (#54). It also records a local Print/Save
   as PDF check: a synthetic event's settlement print HTML, opened in headless
   Chromium, produced a 2-page A4 PDF with the expected headings.
+
+## Backline announcement handoff (#221) — 2026-11-07
+
+Migration 000032 adds announcement channel bindings and handoffs. An owner or
+organizer connects one Backline server channel (`manage_channel_bindings`),
+previews a scheduled announcement against it and hands it off. The new
+`backline-handoff` worker (`backline-workers` Compose profile, off by default)
+signs version 1 requests with HMAC-SHA256, deduplicates through a stable
+occurrence key, holds uncertain results, retries at most five times and sends
+a cancel message for cancelled or revoked handoffs it may already have
+delivered. A signed receipt route records Backline's later delivery outcome.
+The contract is in [backline-handoff.md](backline-handoff.md) and
+`contracts/backline-handoff.v1.*`. Evidence is synthetic: Go tests against
+disposable PostgreSQL and an `httptest` receiver, plus web component tests. No
+real Backline receiver or Discord channel was contacted. Backline #88 owns the
+receiver.

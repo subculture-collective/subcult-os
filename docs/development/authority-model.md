@@ -68,6 +68,7 @@ all); everything else is additive per role, not subtractive from `owner`:
 | `manage_consent` (create/list/withdraw channel consent grants) | yes | yes | no | no | no |
 | `manage_announcements` (create/schedule/cancel/list announcements) | yes | yes | no | no | no |
 | `manage_imports` (create review-only cultural import previews) | yes | yes | no | no | no |
+| `manage_channel_bindings` (connect/revoke an announcement channel binding) | yes | yes | no | no | no |
 
 `manage_members` is owner-only rather than owner-and-organizer: an organizer
 who could grant themselves or an ally the owner role, or revoke the owner,
@@ -90,6 +91,14 @@ anyone's workspace authority. See
 with a source assertion and normalized cultural fields; it grants neither a
 real-world organization claim nor a right to apply, publish, or overwrite a
 canonical record. See [`cultural-import.md`](cultural-import.md).
+
+`manage_channel_bindings` is owner-and-organizer. It connects the workspace
+to one Backline server channel that its administrator approved, or revokes
+that connection. It is separate from `manage_announcements` so the people who
+choose an external destination can later be narrowed without changing who
+drafts announcements. Handing off still requires `manage_announcements` and an
+already scheduled announcement. See
+[`backline-handoff.md`](backline-handoff.md).
 
 ## Expiry, revocation, owner departure and recovery
 

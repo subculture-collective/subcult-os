@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://os.subcult.tv/contracts/backline-handoff.v1.schema.json",
+  "title": "Subcult OS to Backline announcement handoff, version 1",
+  "$comment": "Written contract: docs/development/backline-handoff.md. Examples and signature vectors: backline-handoff.v1.fixtures.json. Payloads carry content and identifiers only.",
+  "$defs": {
+    "occurrenceKey": { "type": "string", "pattern": "^subcult-os/announcement/[0-9a-f-]{36}/binding/[0-9a-f-]{36}$" },
+    "contentRevision": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "snowflake": { "type": "string", "pattern": "^[0-9]{17,20}$" },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "kind", "operation", "occurrenceKey", "contentRevision", "binding", "deliverAt", "expiresAt", "mentionPolicy", "sentAt"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "subcult-os.announcement-handoff" },
+        "operation": { "enum": ["publish", "cancel"] },
+        "occurrenceKey": { "$ref": "#/$defs/occurrenceKey" },
+        "contentRevision": { "$ref": "#/$defs/contentRevision" },
+        "binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "serverId", "channelId"],
+          "properties": {
+            "id": { "type": "string", "format": "uuid" },
+            "serverId": { "$ref": "#/$defs/snowflake" },
+            "channelId": { "$ref": "#/$defs/snowflake" }
+          }
+        },
+        "deliverAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "mentionPolicy": { "const": "none" },
+        "content": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["subject", "body"],
+          "properties": {
+            "subject": { "type": "string", "minLength": 1 },
+            "body": { "type": "string", "minLength": 1 }
+          }
+        },
+        "sentAt": { "type": "string", "format": "date-time" }
+      },
+      "if": { "properties": { "operation": { "const": "publish" } } },
+      "then": { "required": ["content"] },
+      "else": { "not": { "required": ["content"] } }
+    },
+    "acknowledgement": {
+      "type": "object",
+      "required": ["version", "occurrenceKey", "status"],
+      "properties": {
+        "version": { "const": 1 },
+        "occurrenceKey": { "$ref": "#/$defs/occurrenceKey" },
+        "status": { "enum": ["accepted", "duplicate", "cancelled", "not_found", "already_delivered"] },
+        "receiverReference": { "type": "string", "maxLength": 128 }
+      }
+    },
+    "rejection": {
+      "type": "object",
+      "required": ["error"],
+      "properties": { "error": { "type": "string", "pattern": "^[a-z0-9_]{1,64}$" } }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "kind", "occurrenceKey", "contentRevision", "outcome"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "subcult-os.announcement-receipt" },
+        "occurrenceKey": { "$ref": "#/$defs/occurrenceKey" },
+        "contentRevision": { "$ref": "#/$defs/contentRevision" },
+        "outcome": { "enum": ["delivered", "failed", "uncertain", "cancelled"] },
+        "receiverReference": { "type": "string", "maxLength": 128 }
+      }
+    }
+  }
+}

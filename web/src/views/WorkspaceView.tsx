@@ -947,6 +947,7 @@ export function WorkspaceView() {
                         <a className="text-fg-primary underline underline-offset-4" href={`/workspace/${workspace.id}/lifecycle-intents`}>Open lifecycle worklist</a>
                         <a className="text-fg-primary underline underline-offset-4" href={`/workspace/${workspace.id}/venue-access`}>Venue access worksheets</a>
                         <a className="text-fg-primary underline underline-offset-4" href={`/workspace/${workspace.id}/members`}>Manage member roles</a>
+                        <a className="text-fg-primary underline underline-offset-4" href={`/workspace/${workspace.id}/announcements`}>Backline announcements</a>
                       </nav>
                     ) : null}
 

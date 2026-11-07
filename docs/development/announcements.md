@@ -191,13 +191,21 @@ credential, matching `transactional-email.md`'s existing boundary. Do not
 run a live announcement send before #7 is complete and an approved
 recipient list exists.
 
+## Backline channel handoff
+
+An approved (scheduled or dispatched) announcement can also be handed to one
+connected Backline channel. Its outcomes appear in `channelHandoffs` on the
+get/list responses. See [`backline-handoff.md`](backline-handoff.md).
+
 ## Remaining limits
 
-- No SMS or other second channel; `consent_grants.channel` remains
-  constrained to `'email'` (unchanged by this slice).
+- No SMS or other second consent channel; `consent_grants.channel` remains
+  constrained to `'email'` (unchanged by this slice). The Backline handoff
+  posts to a channel, not to individual recipients.
 - `ANNOUNCEMENT_UNIT_COST_CENTS` defaults to `0` ("unknown"), not a real
   observed cost; nothing in this slice supplies a non-zero default.
-- No UI: every endpoint above is API-only.
+- No UI for drafting and scheduling; those endpoints are API-only. The
+  Backline handoff page selects existing announcements.
 - No re-send, editing-after-schedule, or per-recipient personalization
   beyond the withdraw link; the body an operator drafts is sent verbatim
   (plus the withdraw link) to every allowed recipient.
