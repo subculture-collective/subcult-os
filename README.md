@@ -159,9 +159,13 @@ run `node scripts/design-tokens.mjs`. See [docs/design-system.md](docs/design-sy
 
 ## Contributing
 
-Open a pull request on GitHub against `main`. CI runs `make verify` (formatting,
-lint, contract checks, unit tests and builds), the database test suite, and a
-web image build on every pull request. See [CONTRIBUTING.md](CONTRIBUTING.md).
+- Bugs and feature requests: [GitHub issues](https://github.com/subculture-collective/subcult-os/issues).
+- Questions and ideas: [GitHub Discussions](https://github.com/subculture-collective/subcult-os/discussions).
+- Code: open a pull request on GitHub against `main`. CI runs `make verify`
+  (formatting, lint, contract checks, unit tests and builds), the database test
+  suite and a web image build on every pull request. See
+  [CONTRIBUTING.md](CONTRIBUTING.md).
+
 Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
