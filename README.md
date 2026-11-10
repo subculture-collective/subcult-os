@@ -1,71 +1,169 @@
 # Subcult OS
 
-> Alpha development. Real-event operation has not been verified.
-
-![Subcult OS: a tilted purple ticket stub reads Admit one, From the plan to the last ticket, beside a numbered run of plan, coordinate, run door, settle and archive.](https://git.subcult.tv/api/v1/repos/subculture-collective/subcult-os/raw/docs/assets/readme/banner.png?ref=b73e424ce3b0d06c5fd25f3cda5885e5747ba0ff)
+![Subcult OS: a tilted purple ticket stub reads Admit one, From the plan to the last ticket, beside a numbered run of plan, coordinate, run door, settle and archive.](docs/assets/readme/banner.png)
 
 **19:00 doors, and the whole team on one sheet.**
 
-Subcult OS is software for the people running a small event: independent
-venues, collectives and crews. The plan, the staffing, the guest list and the
-end-of-night report sit on one sheet that the whole team reads. It is in alpha
-development, and no real-event operation has been verified on it.
+Subcult OS is software for the people who run small events: independent venues,
+collectives and crews. The plan, the staffing, the guest list, the door and the
+end-of-night report live in one workspace the whole team reads. It is built
+around free ticket reservations. It is in alpha development and has not been
+used to run a real event yet.
 
-[Explore Subcult OS](https://subcult.tv/products/subcult-os) · [Feedback and feature requests](https://git.subcult.tv/subculture-collective/subcult-os/issues) · [Development guide](DEVELOPMENT.md)
+Public event discovery: <https://os.subcult.tv/>. Product page:
+<https://subcult.tv/products/subcult-os>.
 
-## What it covers
+## Features
 
-| Stage | What you can do |
+**Plan**
+
+- Workspaces with invited members, roles and a switcher for people who belong to
+  more than one.
+- Event drafts, reusable event templates and a public event page per event.
+- Private availability polls on draft events, with each option shown in the
+  viewer's time zone and the organizer's.
+- A public discovery page (`/discover`) that lists published events and nothing
+  from the private workspace.
+
+**Coordinate**
+
+- Staffing roles, applications and assignments. Eligible participants can claim
+  and release capped shifts, and export their assigned shifts as an iCalendar
+  file.
+- A participant portal (`/participant`) with a person's own schedule and
+  commitments.
+- Private contacts, commitments and reminder sweeps.
+- A run of show, and private act tech sheets combined into one printable input
+  list.
+- Private venue and event access worksheets that record observations, unknowns
+  and review dates without publishing them.
+- Email announcements to people who opted in. Approved announcements can also be
+  handed to a connected Backline channel or a listmonk list (both optional).
+
+**Door and close-out**
+
+- Free ticket reservations with a ticket link and confirmation.
+- Door check-in by name lookup or ticket code, and time-limited volunteer door
+  links that admit guests without an account.
+- End of Night close-out with a private event report and a settlement export
+  (CSV, Markdown or printable HTML).
+
+**Phone app**
+
+The Expo app in `mobile/` carries the event-time tools: scanner, door search,
+run of show and a live dashboard, plus attendee discovery, reservations and a
+ticket wallet. It runs in Expo Go for development. It is not in an app store.
+
+**Optional and not yet tested against live providers**
+
+- Paid tickets through Stripe.
+- A link to an outside ticket seller per event, limited to hostnames you allow.
+- Event image uploads to S3-compatible storage.
+- Transactional email through Resend or Brevo. Delivery is off by default.
+- Linking an AT Protocol (Bluesky network) account. Off by default.
+
+## Quick start
+
+You need Docker with Compose, Go, Node 24 and pnpm.
+
+```bash
+cp .env.example .env    # optional; the defaults work for local use
+make up-build           # build and start Postgres, API and web
+make urls               # print the local URLs
+make smoke              # check API and web health
+```
+
+By default the web app is on <http://localhost:38079> and the API health check
+on <http://localhost:38080/api/health>. Change `WEB_PORT`, `API_PORT` and
+`POSTGRES_PORT` if those ports are taken.
+
+Run the phone app against the local API:
+
+```bash
+pnpm --dir mobile install
+EXPO_PUBLIC_API_URL=http://<your-lan-ip>:38080 pnpm --dir mobile run start
+```
+
+Tests and checks:
+
+```bash
+make help       # list every target
+make quick      # format, lint and unit tests
+make verify     # everything CI runs, except the database suite
+make test-db    # database tests; needs TEST_DATABASE_URL for a throwaway database
+make alpha-qa   # end-to-end free-ticket run against a disposable local stack
+```
+
+`make down` stops the stack. `make reset-db` deletes the local database and
+starts again.
+
+[DEVELOPMENT.md](DEVELOPMENT.md) has the longer guide: the event lifecycle,
+mobile setup, paid-ticket testing with the Stripe CLI and the rehearsal scripts.
+
+## Configuration
+
+Settings are environment variables. `.env.example` lists them all with comments.
+The main ones:
+
+| Variable | Purpose |
 | --- | --- |
-| Plan | Create a workspace, draft an event, reuse event templates, and publish a public event page. |
-| Coordinate | Invite collaborators, assign staffing, keep private contacts and commitments, prepare the run of show, and collect private act tech sheets into one input list. |
-| Welcome guests | Let guests reserve free tickets, open their ticket links, and check them in by lookup or ticket code. |
-| Run the night | Use the mobile client for scanning, door search, the run of show, and the live dashboard. |
-| Close out | Run End of Night and review the private event report. |
+| `DATABASE_URL` | PostgreSQL connection string. Compose builds it from `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD`. |
+| `SESSION_SECRET` | Session signing secret. Production needs a non-default value of at least 24 characters. |
+| `IDENTITY_PROTECTION_KEY` | Base64 32-byte key that encrypts stored identity data. Required in production. |
+| `PUBLIC_WEB_URL` | The public HTTPS origin, used for links, the sitemap and link previews. |
+| `APP_ENV`, `API_ADDR` | Environment name and API listen address. |
+| `MAIL_DELIVERY_ENABLED`, `MAIL_PROVIDER`, `MAIL_FROM`, `MAIL_REPLY_TO` | Transactional email. Provider keys: `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET` or `BREVO_API_KEY`, `BREVO_WEBHOOK_TOKEN`. |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Paid tickets. Only needed for paid events. |
+| `MEDIA_S3_*`, `MEDIA_PUBLIC_BASE_URL` | Event image storage. |
+| `EXTERNAL_TICKET_ALLOWED_HOSTS` | Comma-separated hostnames allowed for outside ticket links. Empty denies all. |
+| `BACKLINE_HANDOFF_URL`, `BACKLINE_HANDOFF_SECRET` | Optional Backline announcement handoff. |
+| `LISTMONK_URL`, `LISTMONK_API_USER`, `LISTMONK_API_TOKEN` | Optional listmonk announcement relay. |
+| `ATPROTO_OAUTH_*`, `AT_PROJECTION_*` | Optional AT Protocol account linking and record projection. |
+| `MOBILE_APPLE_APP_IDS`, `MOBILE_ANDROID_PACKAGE`, `MOBILE_ANDROID_CERT_SHA256` | App links that open verification emails in the phone app. |
 
-Attendees find published events on the public discovery page. Workspace notes,
-staffing, contacts and reports stay private to the organizer workspace.
+Keep secrets in your deployment's secret store, not in `.env` files you commit.
 
-## Web and phone
+## Deploy
 
-Planning and public event pages are on the web. The Expo mobile app carries the
-event-time tools: scanner, door search, run of show and the dashboard, with
-organizer, staff and attendee flows. It runs in Expo Go for development. App-store
-availability is not promised.
+`docker-compose.yml` defines the full stack: `postgres`, `api` (Go) and `web`
+(the built Vite app behind nginx). Background workers are Compose profiles you
+turn on when you need them:
 
-Private venue and event access worksheets let owners record observations,
-unknowns, and review dates without publishing unverified accessibility claims.
+| Profile | Worker |
+| --- | --- |
+| `mail-workers` | Sends queued transactional email (also needs `MAIL_DELIVERY_ENABLED=true`) |
+| `announcement-workers` | Queues scheduled announcements |
+| `backline-workers` | Hands announcements to Backline |
+| `listmonk-workers` | Relays announcements to listmonk |
+| `atproto-workers`, `atproto-projection` | AT Protocol revocation and projection |
 
-The [private input list](docs/development/tech-sheets.md) combines act inputs,
-shared channels, monitor needs and backline. Operators can open it from the run of
-show; owners and organizers edit sheets and print them from the web.
+A typical deploy sets the production variables above, then runs
+`docker compose up -d --build` with the profiles it needs. `make migrate` applies
+database migrations, and the backend and web images can also be built on their
+own from `backend/` and `web/`.
 
-## Current scope
+## Project layout
 
-Subcult OS is in alpha development. The documented lifecycle starts with
-workspace creation and free ticket reservations and ends with door check-in and
-an event report. Qualification so far uses local rehearsal data; no live event operation has
-been verified. Paid ticketing code exists but needs a configured Stripe integration and
-has not been qualified with a live provider; outbound email requires explicit
-provider setup. AT Protocol integration remains outside the qualified
-live-provider scope.
+```text
+backend/     Go API, migrations runner and workers (cmd/*)
+web/         Vite + React + TypeScript web app
+mobile/      Expo React Native app
+contracts/   Shared API contracts and design tokens
+migrations/  SQL migrations
+scripts/     Dev environment, QA and check scripts
+docs/        Development notes, ADRs and the design system
+```
 
-See the [development guide](DEVELOPMENT.md) for the implemented lifecycle, mobile
-setup, integration limits, and production readiness checklist.
+Both clients share one design system: edit `contracts/design/tokens.json`, then
+run `node scripts/design-tokens.mjs`. See [docs/design-system.md](docs/design-system.md).
 
-## Development
+## Contributing
 
-To run a rehearsal or contribute, start with the [local setup](DEVELOPMENT.md#quick-start)
-and run `make verify` before proposing a change.
+Open a pull request on GitHub against `main`. CI runs `make verify` (formatting,
+lint, contract checks, unit tests and builds), the database test suite, and a
+web image build on every pull request. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
-- [Platform development](docs/development/README.md)
-- [Design system](docs/design-system.md)
-- [Deployment checklist](docs/runbooks/deployment-checklist.md)
-- [Web CI deployment](docs/runbooks/web-ci-deployment.md)
+## License
 
-Built by [Subcult](https://subcult.tv). Licensed under [GPL-3.0-only](LICENSE).
-
-The web build renders the public discovery introduction into HTML and emits its
-canonical URL, robots file, and sitemap using `PUBLIC_WEB_URL`. Published event
-metadata is filled from the public API response. Private workspace, account, and
-ticket pages emit `noindex`; unknown static routes return HTTP 404.
+GNU General Public License v3.0 only. See [LICENSE](LICENSE).
