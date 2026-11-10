@@ -67,7 +67,7 @@ ticket wallet. It runs in Expo Go for development. It is not in an app store.
 You need Docker with Compose, Go, Node 24 and pnpm.
 
 ```bash
-cp .env.example .env    # optional; the defaults work for local use
+cp .env.example .env    # sets PUBLIC_WEB_URL so email and ticket links point at the local web app
 make up-build           # build and start Postgres, API and web
 make urls               # print the local URLs
 make smoke              # check API and web health
