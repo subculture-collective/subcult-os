@@ -6,8 +6,8 @@ updates:
   - package-ecosystem: gomod
     directory: /backend
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
+      interval: monthly
+    open-pull-requests-limit: 1
     groups:
       go-minor-patch:
         update-types: [minor, patch]
@@ -21,8 +21,8 @@ updates:
   - package-ecosystem: npm
     directory: /web
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
+      interval: monthly
+    open-pull-requests-limit: 1
     groups:
       web-minor-patch:
         update-types: [minor, patch]
@@ -36,8 +36,8 @@ updates:
   - package-ecosystem: npm
     directory: /mobile
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
+      interval: monthly
+    open-pull-requests-limit: 1
     # Expo SDK 54 fixes the versions of its companion packages, so stay inside
     # the ranges in package.json and only refresh the lockfile.
     versioning-strategy: lockfile-only
@@ -51,8 +51,8 @@ updates:
   - package-ecosystem: docker
     directory: /web
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
+      interval: monthly
+    open-pull-requests-limit: 1
     groups:
       web-image-minor-patch:
         update-types: [minor, patch]
@@ -65,8 +65,8 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
+      interval: monthly
+    open-pull-requests-limit: 1
     groups:
       actions-minor-patch:
         update-types: [minor, patch]
