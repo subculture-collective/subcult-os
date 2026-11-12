@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Brand } from '../ui/Brand';
 import { TicketStub } from '../ui/TicketStub';
 import type { FormEvent } from 'react';
@@ -46,6 +46,9 @@ export function AuthView() {
 
   const nextPath = useMemo(getNextPath, []);
   const title = useMemo(() => (mode === 'signup' ? 'Create account' : 'Sign in'), [mode]);
+  useEffect(() => {
+    document.title = `${title} | Subcult OS`;
+  }, [title]);
   const eyebrow = mode === 'signup' ? 'New account' : 'Operator access';
   const description =
     mode === 'signup'
@@ -118,20 +121,22 @@ export function AuthView() {
               </div>
             ) : null}
 
-            <div className="mt-6 flex gap-2 text-sm">
+            <nav aria-label="Account" className="mt-6 flex gap-2 text-sm">
               <a
-                className={`px-3 py-2 font-bold uppercase tracking-[0.05em] transition ${mode === 'login' ? 'bg-action-primary text-fg-inverse' : 'bg-surface-inset text-fg-secondary hover:border-stroke-strong'}`}
+                className={`px-3 py-2 font-bold uppercase tracking-[0.05em] transition ${mode === 'login' ? 'bg-action-primary text-fg-inverse underline decoration-2 underline-offset-4' : 'bg-surface-inset text-fg-secondary'}`}
                 href={authHref('login')}
+                aria-current={mode === 'login' ? 'page' : undefined}
               >
                 Sign in
               </a>
               <a
-                className={`px-3 py-2 font-bold uppercase tracking-[0.05em] transition ${mode === 'signup' ? 'bg-action-primary text-fg-inverse' : 'bg-surface-inset text-fg-secondary hover:border-stroke-strong'}`}
+                className={`px-3 py-2 font-bold uppercase tracking-[0.05em] transition ${mode === 'signup' ? 'bg-action-primary text-fg-inverse underline decoration-2 underline-offset-4' : 'bg-surface-inset text-fg-secondary'}`}
                 href={authHref('signup')}
+                aria-current={mode === 'signup' ? 'page' : undefined}
               >
                 Create account
               </a>
-            </div>
+            </nav>
 
             <form className="mt-6 space-y-4" noValidate onSubmit={handleSubmit}>
               <label className="block space-y-2 text-sm">

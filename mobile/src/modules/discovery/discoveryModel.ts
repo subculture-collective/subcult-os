@@ -33,7 +33,7 @@ export function discoveryEmptyTitle(query: string) {
 
 export function discoveryEmptyBody(query: string) {
 	const trimmed = query.trim();
-	return trimmed ? `No published events matched “${trimmed}”. Try another search.` : 'Nothing on the board. Events show here when a host publishes one.';
+	return trimmed ? `No published events matched “${trimmed}”. Try another search.` : 'Nothing on the board. Events run on Subcult OS are listed here. When a host publishes one, it shows with its date and place.';
 }
 
 export function discoveryErrorCopy(message?: string | null) {

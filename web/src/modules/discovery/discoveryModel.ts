@@ -51,7 +51,7 @@ export function discoveryEmptyTitle(searchQuery: string) {
 
 export function discoveryEmptyBody(searchQuery: string) {
 	const query = searchQuery.trim();
-	return query ? `No published events matched “${query}”. Try another search.` : 'Nothing on the board. Events run on Subcult OS are listed here. When a host publishes one, it shows with its date, its place and how many tickets are left.';
+	return query ? `No published events matched “${query}”. Try another search.` : 'Nothing on the board. Events run on Subcult OS are listed here. When a host publishes one, it shows with its date and place.';
 }
 
 export function discoveryErrorCopy(error?: string | null) {

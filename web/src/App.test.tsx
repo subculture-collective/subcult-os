@@ -243,12 +243,16 @@ describe('App routes', () => {
     expect(rendered).toContain('Sign in');
     expect(rendered).toContain('Back on shift.');
     expect(rendered).toContain('8+ characters');
+    expect(rendered).toContain('<nav aria-label="Account"');
+    expect(rendered).toMatch(/href="\/login" aria-current="page"/);
+    expect(rendered).not.toMatch(/href="\/signup" aria-current/);
   });
 
   it('renders the signup auth route', () => {
     const rendered = renderAt('/signup');
     expect(rendered).toContain('New account');
     expect(rendered).toContain('Create account');
+    expect(rendered).toMatch(/href="\/signup" aria-current="page"/);
   });
 
   it('preserves auth next links', () => {
@@ -339,7 +343,7 @@ describe('App routes', () => {
 
 	it('renders the discover empty state', () => {
 		const rendered = renderWithState('/discover', <App />, [[], false, null]);
-		expect(rendered).toContain('Nothing on the board. Events run on Subcult OS are listed here. When a host publishes one, it shows with its date, its place and how many tickets are left.');
+		expect(rendered).toContain('Nothing on the board. Events run on Subcult OS are listed here. When a host publishes one, it shows with its date and place.');
 	});
 
 	it('renders the discover search empty state', () => {

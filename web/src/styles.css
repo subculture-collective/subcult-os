@@ -273,6 +273,8 @@ button {
   outline: 2px solid var(--color-stroke-focus);
   outline-offset: 3px;
 }
+/* Keep the whole 5px ring on screen when keyboard focus scrolls a control into view. */
+:where(a, button, input, textarea, select, summary) { scroll-margin-block: 0.5rem; }
 @layer base {
   :where(button, input, select):not([type="checkbox"]):not([type="radio"]) { min-height: var(--spacing-touch); }
 }
