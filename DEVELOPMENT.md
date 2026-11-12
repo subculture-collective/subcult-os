@@ -6,7 +6,7 @@ Transactional email uses an opt-in Brevo or Resend worker while Proton remains t
 
 The one implemented announcement channel (verified email; see [`docs/development/announcements.md`](docs/development/announcements.md)) uses a separate `announcement-workers` Compose profile, running `email-deliver -announce -watch`. It only claims due scheduled announcements and enqueues their recipient `email_outbox` rows; it never contacts the mail provider itself, so it does not require `MAIL_DELIVERY_ENABLED=true` and can run independently of `mail-workers`. Actual sending of an announcement's enqueued rows still goes through `mail-workers`/`-send`, and is still subject to `MAIL_DELIVERY_ENABLED`.
 
-Gitea verification installs Node 24, pnpm 10.33.0 and Go 1.26.6 inside each job.
+CI installs Node 24, pnpm 10.33.0 and Go 1.26.11 inside each job.
 The shared runner must provide Docker Compose for configuration validation. CI
 starts a job-scoped PostgreSQL 17 service with disposable credentials and no host
 port or persistent volume, then runs `make test-db`; it does not deploy the app.
@@ -72,7 +72,7 @@ bash scripts/dev-env.sh test-db   # separate disposable PostgreSQL database
 bash scripts/dev-env.sh verify    # make verify, followed by make test-db
 ```
 
-The helpers pin Node 24.18.0, pnpm 10.33.0, and Go 1.26.6. Each worktree has
+The helpers pin Node 24.18.0, pnpm 10.33.0, and Go 1.26.11. Each worktree has
 its own Compose project, network, development database, and Go caches. Test DB
 containers use temporary storage and are removed after the run, including failed
 runs. Test database logs are retained in ignored `.cache/dev-env/test-db.log`;

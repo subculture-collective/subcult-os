@@ -70,7 +70,7 @@ make verify
 
 Use narrower commands only when an issue explicitly asks for a smaller check.
 
-CI provisions Node 24, pnpm 10.33.0 and Go 1.26.9 in the job rather than
+CI provisions Node 24, pnpm 10.33.0 and Go 1.26.11 in the job rather than
 assuming the runner image includes them. Keep toolchain changes explicit, in both
 workflows, and distinguish local `make verify` from the actual hosted result.
 Pull requests are verified on the GitHub organization mirror by

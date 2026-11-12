@@ -19,13 +19,13 @@ dc() {
 }
 
 toolchain() {
-  mise exec node@24.18.0 go@1.26.6 pnpm@10.33.0 -- "$@"
+  mise exec node@24.18.0 go@1.26.11 pnpm@10.33.0 -- "$@"
 }
 
 setup() {
   command -v mise >/dev/null
   command -v docker >/dev/null
-  mise install node@24.18.0 go@1.26.6 pnpm@10.33.0
+  mise install node@24.18.0 go@1.26.11 pnpm@10.33.0
   toolchain make deps
   dc config --quiet
 }

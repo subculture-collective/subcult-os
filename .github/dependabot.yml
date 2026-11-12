@@ -1,0 +1,75 @@
+# Green pull requests in this organization merge themselves and main deploys
+# the web image, so every ecosystem ignores major versions, groups minor and
+# patch updates into one pull request and keeps at most two open.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+      # Pinned to a reviewed pseudo-version (.blacktower/clonedeps.json,
+      # docs/upstream/); update by hand.
+      - dependency-name: github.com/bluesky-social/indigo
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      web-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+      # Pinned exactly beside the contract fixtures; update by hand.
+      - dependency-name: '@atproto/lexicon'
+      - dependency-name: '@atproto/syntax'
+
+  - package-ecosystem: npm
+    directory: /mobile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    # Expo SDK 54 fixes the versions of its companion packages, so stay inside
+    # the ranges in package.json and only refresh the lockfile.
+    versioning-strategy: lockfile-only
+    groups:
+      mobile-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: docker
+    directory: /web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      web-image-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+      # Node is bumped by hand together with the workflows and dev helpers.
+      - dependency-name: node
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
