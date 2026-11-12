@@ -260,7 +260,7 @@ This repository keeps the base Open Pilot issue template and PR template.
 Bootstrap labels after creating a repo from this template:
 
 ```bash
-open-pilot labels bootstrap PatrickFanella/subcult-os
+open-pilot labels bootstrap subculture-collective/subcult-os
 ```
 
 ## License

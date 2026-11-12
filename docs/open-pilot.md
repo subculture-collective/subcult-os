@@ -16,7 +16,7 @@ The issue template adds `ready-for-agent`. A human should add `agent:queued` onl
 Run this after creating a repository from the template:
 
 ```bash
-open-pilot labels bootstrap PatrickFanella/subcult-os
+open-pilot labels bootstrap subculture-collective/subcult-os
 ```
 
 ## Issue requirements

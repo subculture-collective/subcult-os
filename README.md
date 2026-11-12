@@ -145,11 +145,10 @@ own from `backend/` and `web/`.
 ## Project layout
 
 ```text
-backend/     Go API, migrations runner and workers (cmd/*)
+backend/     Go API, SQL migrations, migration runner and workers (cmd/*)
 web/         Vite + React + TypeScript web app
 mobile/      Expo React Native app
 contracts/   Shared API contracts and design tokens
-migrations/  SQL migrations
 scripts/     Dev environment, QA and check scripts
 docs/        Development notes, ADRs and the design system
 ```
