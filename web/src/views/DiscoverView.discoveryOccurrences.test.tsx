@@ -97,7 +97,7 @@ describe('DiscoveryOccurrencesSection states', () => {
 	it('renders the empty state', () => {
 		const { element } = renderSection([[], false, null, null]);
 		const html = renderToString(element);
-		expect(html).toContain('No discovery occurrences yet');
+		expect(html).toContain('No cultural events shared yet');
 	});
 
 	it('renders the error state', () => {

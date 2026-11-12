@@ -339,7 +339,7 @@ describe('App routes', () => {
 
 	it('renders the discover empty state', () => {
 		const rendered = renderWithState('/discover', <App />, [[], false, null]);
-		expect(rendered).toContain('Nothing on the board. Events show here when a host publishes one.');
+		expect(rendered).toContain('Nothing on the board. Events run on Subcult OS are listed here. When a host publishes one, it shows with its date, its place and how many tickets are left.');
 	});
 
 	it('renders the discover search empty state', () => {

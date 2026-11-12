@@ -96,8 +96,11 @@ in live Space Mono bold, so the wordmark follows the theme and stays selectable
 text. The pack uses the same dark-panel mark on light and dark backgrounds.
 Follow the pack guide: keep a quarter of the mark height clear, never show the
 mark below 32 px, and do not stretch, recolor or redraw it. Authentication,
-invitation, identity, consent and operator home headers use the lockup. Public
-event, ticket and door screens keep event identity first and carry no lockup.
+invitation, identity, consent and operator home headers use the lockup. Discover
+is the signed-out front page, so it carries the lockup and one line saying what
+Subcult OS is (`discoveryProductLine`, from the Studio claims register entry
+C-OS). Public event, ticket and door screens keep event identity first and carry
+no lockup.
 
 The link preview image is the same for every URL because the web client renders
 routes in the browser. Crawlers need an absolute address, so the web build

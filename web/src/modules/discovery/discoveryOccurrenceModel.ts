@@ -3,8 +3,8 @@ import type { PublicDiscoveryHandoffDTO, PublicDiscoveryLocationDTO, PublicDisco
 export const discoveryOccurrencesTitle = 'Cultural discovery';
 export const discoveryOccurrencesDescription = 'Public cultural events and where they are. Open one for its details and whether it can be reserved here.';
 export const discoveryOccurrencesLoadingCopy = 'Loading discovery occurrences…';
-export const discoveryOccurrencesEmptyTitle = 'No discovery occurrences yet';
-export const discoveryOccurrencesEmptyBody = 'Public cultural events will appear here when they are shared.';
+export const discoveryOccurrencesEmptyTitle = 'No cultural events shared yet';
+export const discoveryOccurrencesEmptyBody = 'When public cultural events are shared, they show here with their locations.';
 export const discoveryOccurrenceDetailCloseLabel = 'Close';
 export const discoveryOccurrenceUnavailableLabel = 'This occurrence is no longer available from its source.';
 export const discoveryOccurrenceExternalLabel = '(opens an external site)';

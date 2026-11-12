@@ -41,9 +41,9 @@ describe('discovery model helpers', () => {
 		expect(discoveryRemainingLabel({ isFull: true, remainingTickets: 0 } as never)).toBe('Sold out');
 		expect(discoveryEmptyTitle('')).toBe('No published events yet');
 		expect(discoveryEmptyTitle('market')).toBe('No events match that search');
-		expect(discoveryEmptyBody('')).toBe('Nothing on the board. Events show here when a host publishes one.');
+		expect(discoveryEmptyBody('')).toBe('Nothing on the board. Events run on Subcult OS are listed here. When a host publishes one, it shows with its date, its place and how many tickets are left.');
 		expect(discoveryEmptyBody('market')).toBe('No published events matched “market”. Try another search.');
-		expect(discoveryEmptyStateCopy('')).toBe('Nothing on the board. Events show here when a host publishes one.');
+		expect(discoveryEmptyStateCopy('')).toBe('Nothing on the board. Events run on Subcult OS are listed here. When a host publishes one, it shows with its date, its place and how many tickets are left.');
 		expect(discoveryEmptyStateCopy('market')).toBe('No published events matched “market”. Try another search.');
 		expect(discoveryErrorCopy('offline')).toBe('Could not load published events: offline');
 	});

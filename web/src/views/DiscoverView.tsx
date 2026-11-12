@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { api } from '../api';
+import { Brand } from '../ui/Brand';
 import { TicketStub, indexLabel } from '../ui/TicketStub';
 import type { PublicDiscoveryOccurrenceDTO, PublicEventSummaryDTO } from '../domain';
 import {
@@ -12,6 +13,7 @@ import {
 	discoveryErrorCopy,
 	discoveryLoadingCopy,
 	discoveryPricingLabel,
+	discoveryProductLine,
 	discoveryRemainingLabel,
 	discoveryScopeLabel,
 	discoverySearchLabel,
@@ -321,7 +323,9 @@ export function DiscoverView() {
 	return (
 		<main className={publicPageShellClass}>
 			<section className={`${publicPageInnerClass} min-w-0 max-w-6xl [overflow-wrap:anywhere]`}>
-				<header className="grid min-w-0 gap-10 pt-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] md:items-center md:gap-12 md:pt-10">
+				<Brand />
+
+				<header className="grid min-w-0 gap-10 pt-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] md:items-center md:gap-12 md:pt-6">
 					<TicketStub kicker={`Subcult OS / ${discoveryBrowseLabel}`} tilt className="mx-2 md:mx-0">
 						<h1 className="ticket-stub-title">{discoveryTitle}</h1>
 					</TicketStub>
@@ -331,7 +335,8 @@ export function DiscoverView() {
 							<span className={publicStatusPillClass('success')}>{discoveryBadgeLabel}</span>
 							<span className={publicStatusPillClass()}>{discoveryScopeLabel}</span>
 						</div>
-						<p className="mt-5 max-w-md text-base leading-7 text-fg-secondary">{discoveryDescription}</p>
+						<p className="mt-5 max-w-md text-base leading-7 text-fg-primary">{discoveryProductLine}</p>
+						<p className="mt-3 max-w-md text-base leading-7 text-fg-secondary">{discoveryDescription}</p>
 						<nav aria-label="Sections" className="mt-6">
 							<ol className="flex flex-col gap-3">
 								<li><a className="index-label underline-offset-4 hover:underline" href="#listings">{indexLabel(1, 'Listings')}</a></li>
