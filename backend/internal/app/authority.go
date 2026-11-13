@@ -156,7 +156,9 @@ func (a *App) activeMembership(ctx context.Context, personID, workspaceID string
 
 // activeMembershipWith runs the membership lookup on q. A handler that holds
 // a transaction passes it here so the check reuses that connection instead of
-// taking a second one from the pool.
+// taking a second one from the pool. Expiry uses clock_timestamp() because
+// now() inside that transaction is its start time, which can precede a lock
+// wait.
 func activeMembershipWith(ctx context.Context, q queryRower, personID, workspaceID string) (string, error) {
 	if personID == "" || workspaceID == "" {
 		return "", ErrMembershipDenied
@@ -169,7 +171,7 @@ func activeMembershipWith(ctx context.Context, q queryRower, personID, workspace
 		  and person_id = $2
 		  and removed_at is null
 		  and revoked_at is null
-		  and (expires_at is null or expires_at > now())
+		  and (expires_at is null or expires_at > clock_timestamp())
 	`, workspaceID, personID).Scan(&role)
 	if err != nil {
 		return "", ErrMembershipDenied

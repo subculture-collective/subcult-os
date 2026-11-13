@@ -95,6 +95,28 @@ func TestDoorPermissionAndAdmissionDTO(t *testing.T) {
 }
 
 func TestDoorCheckInRechecksActivePermissionAfterTicketLock(t *testing.T) {
+	doorCheckInAfterTicketLock(t, func(t *testing.T, fx lifecycleFixture, memberID string) {
+		if _, err := fx.app.db.Exec(t.Context(), `update workspace_members set revoked_at = now() where id = $1`, memberID); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// The post-lock check must use the time it runs, not the time the check-in's
+// transaction started before it waited on the lock.
+func TestDoorCheckInRechecksMembershipExpiryAfterTicketLock(t *testing.T) {
+	doorCheckInAfterTicketLock(t, func(t *testing.T, fx lifecycleFixture, memberID string) {
+		if _, err := fx.app.db.Exec(t.Context(), `update workspace_members set expires_at = clock_timestamp() + interval '500 milliseconds' where id = $1`, memberID); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+	})
+}
+
+// doorCheckInAfterTicketLock blocks a door staff check-in on the ticket row
+// lock, runs change while it waits, and expects the check-in to be refused.
+func doorCheckInAfterTicketLock(t *testing.T, change func(*testing.T, lifecycleFixture, string)) {
+	t.Helper()
 	fx := newLifecycleFixture(t)
 	eventID := mustString(t, createEvent(t, fx, "Door Permission Race", 2), "id")
 	publishEvent(t, fx, eventID)
@@ -147,9 +169,7 @@ func TestDoorCheckInRechecksActivePermissionAfterTicketLock(t *testing.T) {
 	if !blocked {
 		t.Fatal("timed out waiting for door check-in to block on the ticket lock")
 	}
-	if _, err := fx.app.db.Exec(t.Context(), `update workspace_members set revoked_at = now() where id = $1`, memberID); err != nil {
-		t.Fatal(err)
-	}
+	change(t, fx, memberID)
 	if err := blocker.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +177,7 @@ func TestDoorCheckInRechecksActivePermissionAfterTicketLock(t *testing.T) {
 	select {
 	case status := <-result:
 		if status != http.StatusForbidden {
-			t.Fatalf("check-in after revoked door access status=%d", status)
+			t.Fatalf("check-in after losing door access status=%d", status)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for blocked door check-in")
@@ -167,7 +187,7 @@ func TestDoorCheckInRechecksActivePermissionAfterTicketLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	if status != "reserved" {
-		t.Fatalf("revoked door access checked in ticket: %s", status)
+		t.Fatalf("lost door access checked in ticket: %s", status)
 	}
 }
 
