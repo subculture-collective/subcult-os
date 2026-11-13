@@ -76,10 +76,8 @@ async function account(email, displayName) {
   return session;
 }
 
-// Runs fn over items with two requests in flight. Ticket handlers hold a
-// transaction while taking a second pooled connection, so more parallelism
-// starves the API's small connection pool.
-async function each(items, fn, limit = 2) {
+// Runs fn over items with a few requests in flight.
+async function each(items, fn, limit = 8) {
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (next < items.length) {

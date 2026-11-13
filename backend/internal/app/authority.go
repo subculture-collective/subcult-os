@@ -148,11 +148,21 @@ var (
 // route through it so a revoked or expired actor is refused everywhere at
 // once.
 func (a *App) activeMembership(ctx context.Context, personID, workspaceID string) (string, error) {
-	if a.db == nil || personID == "" || workspaceID == "" {
+	if a.db == nil {
+		return "", ErrMembershipDenied
+	}
+	return activeMembershipWith(ctx, a.db, personID, workspaceID)
+}
+
+// activeMembershipWith runs the membership lookup on q. A handler that holds
+// a transaction passes it here so the check reuses that connection instead of
+// taking a second one from the pool.
+func activeMembershipWith(ctx context.Context, q queryRower, personID, workspaceID string) (string, error) {
+	if personID == "" || workspaceID == "" {
 		return "", ErrMembershipDenied
 	}
 	var role string
-	err := a.db.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		select role
 		from workspace_members
 		where workspace_id = $1
@@ -171,7 +181,15 @@ func (a *App) activeMembership(ctx context.Context, personID, workspaceID string
 // or expired membership as no membership, then checks the active role
 // against the least-privilege permission matrix.
 func (a *App) authorize(ctx context.Context, personID, workspaceID, permission string) error {
-	role, err := a.activeMembership(ctx, personID, workspaceID)
+	if a.db == nil {
+		return ErrMembershipDenied
+	}
+	return authorizeWith(ctx, a.db, personID, workspaceID, permission)
+}
+
+// authorizeWith is authorize on a caller-supplied connection or transaction.
+func authorizeWith(ctx context.Context, q queryRower, personID, workspaceID, permission string) error {
+	role, err := activeMembershipWith(ctx, q, personID, workspaceID)
 	if err != nil {
 		return err
 	}

@@ -77,8 +77,11 @@ func (a *App) doorActor(r *http.Request, event eventRow, q queryRower) (personID
     and not exists (select 1 from event_occurrences o where o.event_id=e.id and o.status='cancelled') for share of l,e`, id, event.ID).Scan(&linkID)
 		return "", linkID, err == nil
 	}
-	personID, ok = a.requirePermission(r, event.WorkspaceID, permDoor)
-	return personID, "", ok
+	personID, ok = a.requirePersonID(r)
+	if !ok || authorizeWith(r.Context(), q, personID, event.WorkspaceID, permDoor) != nil {
+		return "", "", false
+	}
+	return personID, "", true
 }
 
 func (a *App) doorLinkOwner(w http.ResponseWriter, r *http.Request) (eventRow, string, bool) {

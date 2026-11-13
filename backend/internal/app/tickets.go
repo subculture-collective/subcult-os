@@ -582,8 +582,8 @@ func (a *App) handleCreateTestTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not load ticket capacity")
 		return
 	}
-	actorID, _, ok := a.requireCoordinator(r, event.WorkspaceID)
-	if !ok {
+	actorID, ok := a.requirePersonID(r)
+	if !ok || authorizeWith(r.Context(), tx, actorID, event.WorkspaceID, permCoordinate) != nil {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestDoorPermissionAndAdmissionDTO(t *testing.T) {
@@ -176,4 +178,43 @@ func ticketCode(t *testing.T, fx lifecycleFixture, ticketID string) string {
 		t.Fatal(err)
 	}
 	return code
+}
+
+// A handler that holds a transaction must not take a second pooled
+// connection for its authority check; under load every request would hold
+// one connection while waiting for another.
+func TestTicketHandlersWithSingleConnection(t *testing.T) {
+	fx := newLifecycleFixture(t)
+	eventID := mustString(t, createEvent(t, fx, "Single Connection Door", 3), "id")
+	publishEvent(t, fx, eventID)
+	code := ticketCode(t, fx, insertTicketWithPaymentStatus(t, fx, eventID, "single-conn@example.test", "Single Conn", "free", 0, "usd"))
+
+	config := fx.app.db.Config()
+	config.MaxConns = 1
+	config.MinConns = 0
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	single := New(fx.app.config, pool)
+
+	post := func(path string, body map[string]any) int {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, path, bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(fx.ownerCookie)
+		rec := httptest.NewRecorder()
+		single.Handler().ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := post("/api/events/"+eventID+"/door/check-ins", map[string]any{"code": code}); got != http.StatusOK {
+		t.Fatalf("staff check-in on one connection = %d, want 200", got)
+	}
+	if got := post("/api/events/"+eventID+"/test-ticket", map[string]any{}); got != http.StatusOK {
+		t.Fatalf("test ticket on one connection = %d, want 200", got)
+	}
 }
