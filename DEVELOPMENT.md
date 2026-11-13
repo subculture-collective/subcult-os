@@ -60,11 +60,31 @@ pools, so stop previews you are not using. A DB test run in a worktree with no
 preview releases its network the same way. Start recreates the environment. Docker-assigned ports may change after a stop or recreation;
 use Preview URL again. These URLs are local to the machine running T3.
 
-Seed Demo Data creates `dev@example.test` with password `local-development-only`,
-a Development Collective workspace, and a draft Development Night event. It
-reads only that synthetic user's held verification mail and consumes the normal
-verification endpoint. Repeating it preserves the existing demo workspace/event.
-No external mail is sent.
+Seed Demo Data creates `dev@example.test` (owner) with password
+`local-development-only`, a Development Collective workspace and a draft
+Development Night event. It then adds, all through the normal API:
+
+- Staff: an organizer, finance, two door staff, crew (one with access expiring
+  in 30 days), three participants, a revoked member and one unaccepted
+  invitation. Staff sign in as `<name>.staff@example.test` with the same
+  password; the seed prints the list.
+- 53 events from `scripts/dev-seed-catalog.mjs`, spread from four months ago
+  to five months ahead in the host's time zone: closed (end of night) events
+  with check-ins, past events not yet closed, two happening today, free events
+  from empty to sold out, paid events, drafts (some unpublishable), and
+  occurrences that are postponed, rescheduled or cancelled, including series.
+- Venues, acts and credits, run-of-show tasks and shifts assigned to staff,
+  public role calls with applications in every review state, and about 3,000
+  reservations from synthetic guests.
+- Artwork: Unsplash photos hotlinked by URL, or posters generated as SVG data
+  URIs, because the development stack has no object store. Some events have
+  none. Stage plots are not seeded because they need the private bucket.
+
+It reads only the synthetic users' held verification mail and consumes the
+normal verification endpoint. Repeating it keeps existing people, venues, acts
+and events (matched by title) and adds only what is missing. To start over,
+use `down` and `start`. No external mail is sent. The first run takes about
+two minutes.
 
 ```bash
 bash scripts/dev-env.sh test      # backend, web, mobile, and QA helper tests
