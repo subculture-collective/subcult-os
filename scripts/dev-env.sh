@@ -25,7 +25,10 @@ toolchain() {
 setup() {
   command -v mise >/dev/null
   command -v docker >/dev/null
-  mise install node@24.18.0 go@1.26.11 pnpm@10.33.0
+  # A no-op `mise install` still repairs shared runtime symlinks, which can need
+  # sudo on hosts with a system tool directory; skip it when the pins are present.
+  mise install --dry-run-code node@24.18.0 go@1.26.11 pnpm@10.33.0 >/dev/null 2>&1 ||
+    mise install node@24.18.0 go@1.26.11 pnpm@10.33.0
   toolchain make deps
   dc config --quiet
 }
