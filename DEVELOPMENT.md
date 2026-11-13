@@ -81,9 +81,12 @@ Development Night event. It then adds, all through the normal API:
   none. Stage plots are not seeded because they need the private bucket.
 
 It reads only the synthetic users' held verification mail and consumes the
-normal verification endpoint. Repeating it keeps existing people, venues, acts
-and events (matched by title) and adds only what is missing. To start over,
-use `down` and `start`. No external mail is sent. The first run takes about
+normal verification endpoint. Repeating it keeps existing people, venues and
+acts, skips events it finished seeding (recorded in the dev database's
+`dev_seed` schema) and adds only what is missing. An event left half-seeded by
+an interrupted run is seeded again: a draft is first renamed with an
+"(interrupted seed)" suffix, and a published one is reported and left beside
+the new copy. To start over, use `down` and `start`. No external mail is sent. The first run takes about
 two minutes.
 
 ```bash

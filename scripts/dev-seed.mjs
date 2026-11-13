@@ -45,22 +45,26 @@ class Session {
   patch(path, body, allowed) { return this.request('PATCH', path, body, allowed); }
 }
 
+// Runs SQL against this environment's dev database. Values are passed as psql
+// variables, never interpolated into the SQL text.
+function psql(sql, vars = {}) {
+  const args = ['exec', '-i', databaseContainer, 'psql', '-U', 'dev', '-d', 'dev', '-XAqt', '-v', 'ON_ERROR_STOP=1'];
+  for (const [name, value] of Object.entries(vars)) args.push('-v', `${name}=${value}`);
+  return execFileSync('docker', args, { encoding: 'utf8', input: sql });
+}
+
 // Signs up (or reuses) a synthetic account, completing verification from the
 // held outbox row, and returns a signed-in session.
 async function account(email, displayName) {
   const session = new Session();
   const signup = await session.post('/api/auth/signup', { email, password: PASSWORD, displayName }, [409]);
   // Also recovers an interrupted seed after signup but before verification.
-  const message = execFileSync('docker', ['exec', '-i', databaseContainer,
-    'psql', '-U', 'dev', '-d', 'dev', '-XAt', '-v', 'ON_ERROR_STOP=1', '-v', `email=${email}`], {
-    encoding: 'utf8',
-    input: `select o.body from email_outbox o
+  const message = psql(`select o.body from email_outbox o
       join identity_challenges c on c.id = o.related_id
       where o.recipient_email = :'email'
         and o.related_type = 'identity_verification' and o.delivery_status = 'held'
         and c.consumed_at is null and c.expires_at > now()
-      order by o.created_at desc limit 1;`,
-  });
+      order by o.created_at desc limit 1;`, { email });
   if (message.trim()) {
     const link = message.split(/\s+/).find(part => part.startsWith(`${origin}/verify-email?`));
     if (!link) throw new Error('Expected a verification link for this dev origin.');
@@ -310,10 +314,31 @@ async function seedEvent(spec, index) {
   }
 
   if (spec.state === 'closed') await owner.post(`${ev}/end-of-night`);
-  return { title: spec.title, state: spec.state, tickets: codes.length };
+  return { id: event.id, title: spec.title, state: spec.state, tickets: codes.length };
 }
 
-const existing = new Set((await owner.get(`${ws}/events`)).data.map(event => event.title));
+// An event counts as seeded only once every step has finished. The record
+// lives in its own schema in the dev database, outside the application's
+// migrations, so it survives reruns and disappears with `down`.
+psql(`set client_min_messages = warning;
+  create schema if not exists dev_seed;
+  create table if not exists dev_seed.completed_events (
+    event_id uuid primary key, title text not null, completed_at timestamptz not null default now());`);
+const completed = new Set(psql('select title from dev_seed.completed_events;').split('\n').filter(Boolean));
+const listed = (await owner.get(`${ws}/events`)).data;
+const existing = new Set(listed.map(event => event.title));
+// A catalog event that exists without a completion record was interrupted.
+// Its title is released (drafts only; published titles are locked) and the
+// event is seeded again from the start.
+for (const event of listed) {
+  if (completed.has(event.title) || !EVENTS.some(spec => spec.title === event.title)) continue;
+  const released = event.status === 'draft'
+    && (await owner.patch(`/api/events/${event.id}`, { title: `${event.title} (interrupted seed)` }, [400, 409])).status === 200;
+  console.warn(released
+    ? `Renamed interrupted seed event "${event.title}" and seeding it again.`
+    : `"${event.title}" (${event.status}) was interrupted mid-seed and is left as is; seeding a complete copy.`);
+  existing.delete(event.title);
+}
 // The original single development event stays for older notes and tests.
 if (!existing.has('Development Night')) {
   await owner.post(`${ws}/events`, {
@@ -327,7 +352,9 @@ if (!existing.has('Development Night')) {
 const pending = EVENTS.map((spec, index) => ({ spec, index })).filter(({ spec }) => !existing.has(spec.title));
 const results = [];
 await each(pending, async ({ spec, index }) => {
-  results.push(await seedEvent(spec, index));
+  const result = await seedEvent(spec, index);
+  psql('insert into dev_seed.completed_events (event_id, title) values (:\'id\', :\'title\');', { id: result.id, title: result.title });
+  results.push(result);
   process.stdout.write(`\rEvents seeded: ${results.length}/${pending.length}`);
 }, 1);
 if (pending.length) process.stdout.write('\n');
