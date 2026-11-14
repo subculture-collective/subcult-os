@@ -100,19 +100,19 @@ jobs:
         if: github.server_url == 'https://git.subcult.tv' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: bash
         env:
-          DEPLOY_KEY: ${{ secrets.HOMELAB_DEPLOY_KEY }}
+          DEPLOY_KEY_B64: ${{ secrets.HOMELAB_DEPLOY_KEY_B64 }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.HOMELAB_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$DEPLOY_REVISION"
-          test -n "$DEPLOY_KEY"
+          test -n "$DEPLOY_KEY_B64"
           test -n "$DEPLOY_KNOWN_HOSTS"
           umask 077
           deploy_dir=$(mktemp -d)
           trap 'rm -rf "$deploy_dir"' EXIT
-          printf '%s\n' "$DEPLOY_KEY" > "$deploy_dir/key"
+          printf '%s' "$DEPLOY_KEY_B64" | base64 -d > "$deploy_dir/key"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$deploy_dir/known_hosts"
-          unset DEPLOY_KEY DEPLOY_KNOWN_HOSTS
+          unset DEPLOY_KEY_B64 DEPLOY_KNOWN_HOSTS
           ssh_args=(-F /dev/null -i "$deploy_dir/key" -o ControlPath=none -o ControlMaster=no -o BatchMode=yes -o IdentitiesOnly=yes
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$deploy_dir/known_hosts"
             -o ConnectTimeout=15 onnwee@10.0.0.50)
@@ -147,19 +147,19 @@ jobs:
         shell: bash
         env:
           REUSE_ARTIFACT: ${{ steps.artifact.outputs.available }}
-          DEPLOY_KEY: ${{ secrets.HOMELAB_DEPLOY_KEY }}
+          DEPLOY_KEY_B64: ${{ secrets.HOMELAB_DEPLOY_KEY_B64 }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.HOMELAB_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$DEPLOY_REVISION"
-          test -n "$DEPLOY_KEY"
+          test -n "$DEPLOY_KEY_B64"
           test -n "$DEPLOY_KNOWN_HOSTS"
           umask 077
           deploy_dir=$(mktemp -d)
           trap 'rm -rf "$deploy_dir"' EXIT
-          printf '%s\n' "$DEPLOY_KEY" > "$deploy_dir/key"
+          printf '%s' "$DEPLOY_KEY_B64" | base64 -d > "$deploy_dir/key"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$deploy_dir/known_hosts"
-          unset DEPLOY_KEY DEPLOY_KNOWN_HOSTS
+          unset DEPLOY_KEY_B64 DEPLOY_KNOWN_HOSTS
           ssh_args=(-F /dev/null -i "$deploy_dir/key" -o ControlPath=none -o ControlMaster=no -o BatchMode=yes -o IdentitiesOnly=yes
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$deploy_dir/known_hosts"
             -o ConnectTimeout=15 onnwee@10.0.0.50)
